@@ -476,8 +476,8 @@ async def search_medicines(
 # ──────────────────────────────
 if __name__ == "__main__":
     mcp.run(
-        transport="streamable-http",     # streamable-http
+        transport="sse",     # streamable-http
         # host="0.0.0.0",
         # port=8080,            # choose any free port
-        mount_path="/sse/",         # optional – default is /mcp/
+        mount_path="/mcp/",         # optional – default is /mcp/
     )
