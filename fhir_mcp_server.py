@@ -479,5 +479,5 @@ if __name__ == "__main__":
         transport="streamable-http",     # streamable-http
         # host="0.0.0.0",
         # port=8080,            # choose any free port
-        mount_path="/mcp/",         # optional – default is /mcp/
+        mount_path="/sse/",         # optional – default is /mcp/
     )
