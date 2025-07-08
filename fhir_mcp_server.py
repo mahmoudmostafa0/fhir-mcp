@@ -84,7 +84,7 @@ class FHIRClient:
 # ──────────────────────────────
 # MCP server
 # ──────────────────────────────
-mcp = FastMCP("FHIR MCP",json_response=True)
+mcp = FastMCP("FHIR MCP",json_response=True,host="0.0.0.0")
 
 # Lazy singleton for the shared HTTP client
 _client: Optional[FHIRClient] = None
