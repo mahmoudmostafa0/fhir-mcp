@@ -1,0 +1,7 @@
+{
+    "servers": {
+        "test_mcp": {
+            "url": "https://fhir-mcp-development.up.railway.app/mcp/"
+        }
+    }
+}

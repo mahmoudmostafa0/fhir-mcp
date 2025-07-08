@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fhir-server": {
+      "command": "E:/miniconda/python.exe",
+      "args": ["D:/Users/mahmoud.helmy/Downloads/fhir-mcp/fhir_stdio.py"],
+      "env": {
+        "FHIR_BASE_URL": "https://hapi-development.up.railway.app/fhir"
+      }
+    }
+  }
+}
