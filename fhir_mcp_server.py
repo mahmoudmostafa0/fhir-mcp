@@ -84,7 +84,12 @@ class FHIRClient:
 # ──────────────────────────────
 # MCP server
 # ──────────────────────────────
-mcp = FastMCP("FHIR MCP",json_response=True,host="0.0.0.0")
+mcp = FastMCP(
+    "FHIR Server",
+    description="A comprehensive FHIR-compliant server that provides a robust set of tools for securely managing and accessing healthcare data. It supports a wide range of FHIR resources, enabling seamless interaction with patient information, clinical records, and administrative data.",
+    json_response=True,
+    host="0.0.0.0"
+)
 
 # Lazy singleton for the shared HTTP client
 _client: Optional[FHIRClient] = None
@@ -129,7 +134,21 @@ def _entries(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
 # ──────────────────────────────
 @mcp.tool()
 async def get_document_content(document_reference_id: str, extract_text: bool = False) -> Dict[str, Any]:
-    """Get the content of a PDF document from a DocumentReference resource"""
+    """Get the content of a PDF document from a DocumentReference resource.
+
+    This tool retrieves a specified DocumentReference, extracts the PDF content from it,
+    and optionally converts the PDF content to plain text.
+
+    Args:
+        document_reference_id: The ID of the DocumentReference resource.
+        extract_text: If True, extracts and returns the text content from the PDF.
+                      If False (default), returns the base64-encoded PDF content.
+
+    Returns:
+        A dictionary containing the document content. If 'extract_text' is True,
+        the dictionary will have a 'text_content' key. Otherwise, it will have
+        a 'pdf_content_base64' key.
+    """
     cli = _get_client()
     
     # First, get the DocumentReference
@@ -206,7 +225,16 @@ async def get_document_content(document_reference_id: str, extract_text: bool = 
 
 @mcp.tool()
 async def get_patient(patient_id: str) -> str:
-    """Get a specific patient by their ID"""
+    """Get a specific patient by their ID.
+
+    Retrieves the full FHIR Patient resource for a given patient ID.
+
+    Args:
+        patient_id: The logical ID of the patient to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR Patient resource.
+    """
     r = await _get_client().get_patient(patient_id)
     if r.get("resourceType") == "OperationOutcome":
         return r["issue"][0]["details"]["text"]
@@ -215,7 +243,18 @@ async def get_patient(patient_id: str) -> str:
 
 @mcp.tool()
 async def search_patients(name: str | None = None, family: str | None = None, count: int = 10) -> List[str]:
-    """Search for patients in the FHIR server"""
+    """Search for patients in the FHIR server.
+
+    This tool allows searching for patients by their name, family name, or both.
+
+    Args:
+        name: The patient's given name to search for.
+        family: The patient's family name to search for.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Patient resource.
+    """
     params = {"_count": count}
     if name:
         params["name"] = name
@@ -227,13 +266,33 @@ async def search_patients(name: str | None = None, family: str | None = None, co
 
 @mcp.tool()
 async def search_all_patients(count: int = 10) -> List[str]:
-    """Get all patients (no filters)"""
+    """Get all patients (no filters).
+
+    Retrieves a list of all patient resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Patient resource.
+    """
     return await search_patients(count=count)  # type: ignore[arg-type]
 
 
 @mcp.tool()
 async def search_practitioners(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
-    """Search for practitioners (doctors) in the FHIR server"""
+    """Search for practitioners (doctors) in the FHIR server.
+
+    This tool allows searching for practitioners by their name, family name, or both.
+
+    Args:
+        name: The practitioner's given name to search for.
+        family: The practitioner's family name to search for.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Practitioner resource.
+    """
     params = {"_count": count}
     if name:
         params["name"] = name
@@ -245,7 +304,17 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
 
 @mcp.tool()
 async def search_observations(patient: str | None = None, count: int = 10) -> Dict[str, Any]:
-    """Search for observations"""
+    """Search for observations.
+
+    Retrieves observation resources, optionally filtered by patient.
+
+    Args:
+        patient: The ID of the patient to retrieve observations for.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Observation resource.
+    """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
@@ -254,7 +323,14 @@ async def search_observations(patient: str | None = None, count: int = 10) -> Di
 
 @mcp.tool()
 async def get_capability_statement() -> Dict[str, Any]:
-    """Get FHIR server capabilities"""
+    """Get FHIR server capabilities.
+
+    Retrieves the server's capability statement, which provides a summary of the
+    FHIR resources, interactions, and operations supported by the server.
+
+    Returns:
+        A dictionary representing the FHIR CapabilityStatement resource.
+    """
     return await _get_client().search("metadata")
 
 
@@ -265,7 +341,20 @@ async def search_conditions(
     clinical_status: str | None = None,
     count: int = 10,
 ) -> Dict[str, Any]:
-    """Search for conditions/diagnoses (e.g., diabetes)"""
+    """Search for conditions/diagnoses (e.g., diabetes).
+
+    This tool searches for clinical conditions or diagnoses, with options to filter
+    by patient, condition code, and clinical status.
+
+    Args:
+        patient: The ID of the patient to search for conditions.
+        code: A code representing the condition (e.g., from SNOMED CT).
+        clinical_status: The clinical status of the condition (e.g., 'active', 'inactive').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Condition resource.
+    """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
@@ -283,7 +372,20 @@ async def search_medication_requests(
     intent: str | None = None,
     count: int = 10,
 ) -> Dict[str, Any]:
-    """Search for medication requests/prescriptions (e.g., diabetes medications)"""
+    """Search for medication requests/prescriptions (e.g., diabetes medications).
+
+    Searches for medication requests, which can be filtered by patient,
+    status, and intent.
+
+    Args:
+        patient: The ID of the patient to search for medication requests.
+        status: The status of the medication request (e.g., 'active', 'completed').
+        intent: The intent of the request (e.g., 'order', 'plan').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR MedicationRequest resource.
+    """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
@@ -301,7 +403,20 @@ async def search_diagnostic_reports(
     category: str | None = None,
     count: int = 10,
 ) -> Dict[str, Any]:
-    """Search for diagnostic reports (e.g., lab results, HbA1c tests)"""
+    """Search for diagnostic reports (e.g., lab results, HbA1c tests).
+
+    This tool searches for diagnostic reports, which can be filtered by patient,
+    status, and category.
+
+    Args:
+        patient: The ID of the patient to search for diagnostic reports.
+        status: The status of the report (e.g., 'final', 'preliminary').
+        category: The category of the report (e.g., 'LAB', 'IMG').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR DiagnosticReport resource.
+    """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
@@ -319,7 +434,20 @@ async def search_care_plans(
     category: str | None = None,
     count: int = 10,
 ) -> Dict[str, Any]:
-    """Search for care plans (e.g., diabetes management plans)"""
+    """Search for care plans (e.g., diabetes management plans).
+
+    Searches for patient care plans, which can be filtered by patient,
+    status, and category.
+
+    Args:
+        patient: The ID of the patient to search for care plans.
+        status: The status of the care plan (e.g., 'active', 'completed').
+        category: The category of the care plan (e.g., 'assess-plan', 'patient-request').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR CarePlan resource.
+    """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
@@ -337,7 +465,20 @@ async def search_document_references(
     type: str | None = None,
     count: int = 10,
 ) -> Dict[str, Any]:
-    """Search for document references (e.g., clinical documents, reports)"""
+    """Search for document references (e.g., clinical documents, reports).
+
+    Searches for references to clinical documents, which can be filtered by patient,
+    status, and document type.
+
+    Args:
+        patient: The ID of the patient to search for document references.
+        status: The status of the document reference (e.g., 'current', 'superseded').
+        type: The type of the document (e.g., '11506-3' for 'Consultation note').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR DocumentReference resource.
+    """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
@@ -350,7 +491,19 @@ async def search_document_references(
 
 @mcp.tool()
 async def find_patients_with_conditions(code: str | None = None, count: int = 100) -> List[str]:
-    """Find unique patient IDs from condition records (useful when patient records are missing)"""
+    """Find unique patient IDs from condition records.
+
+    This tool is useful for discovering patients who have a specific condition, even if their
+    primary patient records are not directly accessible. It queries condition records
+    and extracts the unique patient IDs associated with them.
+
+    Args:
+        code: The condition code to search for (e.g., from SNOMED CT).
+        count: The maximum number of patient IDs to return (default is 100).
+
+    Returns:
+        A list of unique patient ID strings.
+    """
     bundle = await search_conditions(code=code, count=count)
     pids: Set[str] = {
         e["resource"]["subject"]["reference"].split("/")[-1]
@@ -493,7 +646,18 @@ async def search_medicines(
 
 @mcp.tool()
 async def search_organizations(name: str | None = None, identifier: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
-    """Search for organizations in the FHIR server"""
+    """Search for organizations in the FHIR server.
+
+    Searches for healthcare organizations, which can be filtered by name or identifier.
+
+    Args:
+        name: The name of the organization to search for.
+        identifier: A unique identifier for the organization.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Organization resource.
+    """
     params = {"_count": count}
     if name:
         params["name"] = name
@@ -505,7 +669,16 @@ async def search_organizations(name: str | None = None, identifier: str | None =
 
 @mcp.tool()
 async def search_all_organizations(count: int = 10) -> List[Dict[str, Any]]:
-    """Get all organizations (no filters)"""
+    """Get all organizations (no filters).
+
+    Retrieves a list of all organization resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Organization resource.
+    """
     return await search_organizations(count=count)  # type: ignore[arg-type]
 
 
@@ -513,7 +686,18 @@ async def search_all_organizations(count: int = 10) -> List[Dict[str, Any]]:
 
 @mcp.tool()
 async def search_coverages(patient: str | None = None, status: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
-    """Search for coverage/insurance resources in the FHIR server"""
+    """Search for coverage/insurance resources in the FHIR server.
+
+    Searches for patient coverage information, which can be filtered by patient or status.
+
+    Args:
+        patient: The ID of the patient (beneficiary) to search for coverage.
+        status: The status of the coverage (e.g., 'active', 'cancelled').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Coverage resource.
+    """
     params = {"_count": count}
     if patient:
         params["beneficiary"] = patient
@@ -525,8 +709,229 @@ async def search_coverages(patient: str | None = None, status: str | None = None
 
 @mcp.tool()
 async def search_all_coverages(count: int = 10) -> List[Dict[str, Any]]:
-    """Get all coverage/insurance resources (no filters)"""
+    """Get all coverage/insurance resources (no filters).
+
+    Retrieves a list of all coverage resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Coverage resource.
+    """
     return await search_coverages(count=count)  # type: ignore[arg-type]
+
+@mcp.tool()
+async def get_insurance_plan(insurance_plan_id: str) -> Dict[str, Any]:
+    """Get a specific insurance plan by its ID.
+
+    Retrieves the full FHIR InsurancePlan resource, which contains details about an insurance product,
+    including who is offering the plan, what the coverage is, the network of providers, and costs.
+
+    Args:
+        insurance_plan_id: The logical ID of the insurance plan to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR InsurancePlan resource.
+    """
+    return await _get_client()._req("GET", f"InsurancePlan/{insurance_plan_id}")
+
+
+@mcp.tool()
+async def search_insurance_plans(
+    owned_by: str | None = None, administered_by: str | None = None, name: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for insurance plans (e.g., specific health insurance products).
+
+    Searches for insurance plans, which contain details about insurance products, including who is
+    offering the plan, what the coverage is, the network of providers, and costs.
+    Can be filtered by the owning organization, administering organization, and plan name.
+
+    Args:
+        owned_by: The organization that owns the insurance plan.
+        administered_by: The organization that administers the insurance plan.
+        name: The name of the insurance plan.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR InsurancePlan resource.
+    """
+    params = {"_count": count}
+    if owned_by:
+        params["owned-by"] = owned_by
+    if administered_by:
+        params["administered-by"] = administered_by
+    if name:
+        params["name"] = name
+    b = await _get_client().search("InsurancePlan", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_insurance_plans(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all insurance plans (no filters).
+
+    Retrieves a list of all insurance plan resources from the FHIR server. Each resource contains
+    details about an insurance product, including the plan's coverage, provider network, and costs.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR InsurancePlan resource.
+    """
+    return await search_insurance_plans(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_encounters(
+    patient: str | None = None, status: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for encounters (e.g., hospital visits, appointments).
+
+    Searches for patient encounters, which can be filtered by patient or encounter status.
+
+    Args:
+        patient: The ID of the patient to search for encounters.
+        status: The status of the encounter (e.g., 'in-progress', 'finished').
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Encounter resource.
+    """
+    params = {"_count": count}
+    if patient:
+        params["patient"] = patient
+    if status:
+        params["status"] = status
+    b = await _get_client().search("Encounter", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_encounters(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all encounters (no filters).
+
+    Retrieves a list of all encounter resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Encounter resource.
+    """
+    return await search_encounters(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_allergy_intolerances(
+    patient: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for allergy intolerances.
+
+    Searches for allergy and intolerance records for a specific patient.
+
+    Args:
+        patient: The ID of the patient to search for allergy intolerances.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR AllergyIntolerance resource.
+    """
+    params = {"_count": count}
+    if patient:
+        params["patient"] = patient
+    b = await _get_client().search("AllergyIntolerance", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_allergy_intolerances(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all allergy intolerances (no filters).
+
+    Retrieves a list of all allergy intolerance resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR AllergyIntolerance resource.
+    """
+    return await search_allergy_intolerances(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_procedures(
+    patient: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for procedures.
+
+    Searches for clinical procedures performed on a patient.
+
+    Args:
+        patient: The ID of the patient to search for procedures.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Procedure resource.
+    """
+    params = {"_count": count}
+    if patient:
+        params["patient"] = patient
+    b = await _get_client().search("Procedure", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_procedures(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all procedures (no filters).
+
+    Retrieves a list of all procedure resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Procedure resource.
+    """
+    return await search_procedures(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_immunizations(
+    patient: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for immunization records.
+
+    Searches for immunization records for a specific patient.
+
+    Args:
+        patient: The ID of the patient to search for immunization records.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Immunization resource.
+    """
+    params = {"_count": count}
+    if patient:
+        params["patient"] = patient
+    b = await _get_client().search("Immunization", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_immunizations(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all immunization records (no filters).
+
+    Retrieves a list of all immunization resources from the FHIR server, without applying any filters.
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Immunization resource.
+    """
+    return await search_immunizations(count=count)  # type: ignore[arg-type]
 
 
 # ──────────────────────────────
