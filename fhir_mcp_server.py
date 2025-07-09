@@ -722,8 +722,14 @@ async def search_all_coverages(count: int = 10) -> List[Dict[str, Any]]:
 async def get_insurance_plan(insurance_plan_id: str) -> Dict[str, Any]:
     """Get a specific insurance plan by its ID.
 
-    Retrieves the full FHIR InsurancePlan resource, which contains details about an insurance product,
-    including who is offering the plan, what the coverage is, the network of providers, and costs.
+    Retrieves the full FHIR InsurancePlan resource, which contains comprehensive details about an insurance product,
+    including:
+    - Plan name and status (active/inactive)
+    - Owning and administering organizations
+    - Network of providers (hospitals, pharmacies, etc.)
+    - Plan type (medical, dental, etc.)
+    - Specific costs and benefits by category (hospital services, pharmacy, etc.)
+    - Copayment percentages and other cost-sharing details
 
     Args:
         insurance_plan_id: The logical ID of the insurance plan to retrieve.
@@ -740,8 +746,14 @@ async def search_insurance_plans(
 ) -> List[Dict[str, Any]]:
     """Search for insurance plans (e.g., specific health insurance products).
 
-    Searches for insurance plans, which contain details about insurance products, including who is
-    offering the plan, what the coverage is, the network of providers, and costs.
+    Searches for insurance plans, which contain comprehensive details about insurance products, including:
+    - Plan name and status (active/inactive)
+    - Owning and administering organizations
+    - Network of providers (hospitals, pharmacies, etc.) with their references
+    - Plan type (medical, dental, etc.)
+    - Specific costs and benefits by category (hospital services, pharmacy, etc.)
+    - Copayment percentages and other cost-sharing details
+    
     Can be filtered by the owning organization, administering organization, and plan name.
 
     Args:
