@@ -686,7 +686,13 @@ async def search_coverages(patient: str | None = None, status: str | None = None
     """Search for coverage/insurance resources in the FHIR server.
 
     Searches for patient coverage information, which can be filtered by patient or status.
-
+    Coverage resources contain detailed information about a patient's insurance coverage, including:
+    - Coverage status (active, cancelled, etc.)
+    - Coverage type (e.g., Extended health)
+    - Subscriber and beneficiary information (patient references)
+    - Payor organization references (insurance companies)
+    - Plan class details (plan name, value, type)
+    
     Args:
         patient: The ID of the patient (beneficiary) to search for coverage.
         status: The status of the coverage (e.g., 'active', 'cancelled').
@@ -709,6 +715,12 @@ async def search_all_coverages(count: int = 10) -> List[Dict[str, Any]]:
     """Get all coverage/insurance resources (no filters).
 
     Retrieves a list of all coverage resources from the FHIR server, without applying any filters.
+    Coverage resources contain detailed information about a patient's insurance coverage, including:
+    - Coverage status (active, cancelled, etc.)
+    - Coverage type (e.g., Extended health)
+    - Subscriber and beneficiary information (patient references)
+    - Payor organization references (insurance companies)
+    - Plan class details (plan name, value, type)
 
     Args:
         count: The maximum number of results to return (default is 10).
@@ -717,6 +729,59 @@ async def search_all_coverages(count: int = 10) -> List[Dict[str, Any]]:
         A list of dictionaries, where each dictionary is a FHIR Coverage resource.
     """
     return await search_coverages(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_related_persons(
+    patient: str | None = None, relationship: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for related persons in the FHIR server.
+
+    Searches for persons related to a patient, which can be filtered by patient or relationship type.
+    RelatedPerson resources contain detailed information about individuals with a personal or professional
+    relationship to a patient, including:
+    - Patient reference (the patient they are related to)
+    - Relationship type (spouse, child, parent, etc.)
+    - Personal information (name, gender, birth date)
+    - Contact information (when available)
+    
+    Args:
+        patient: The ID of the patient to search for related persons.
+        relationship: The relationship type code (e.g., 'SPS' for spouse, 'CHILD' for child, 'FTH' for father).
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR RelatedPerson resource.
+    """
+    params = {"_count": count}
+    if patient:
+        params["patient"] = patient
+    if relationship:
+        params["relationship"] = relationship
+    b = await _get_client().search("RelatedPerson", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_related_persons(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all related persons (no filters).
+
+    Retrieves a list of all related person resources from the FHIR server, without applying any filters.
+    RelatedPerson resources contain detailed information about individuals with a personal or professional
+    relationship to a patient, including:
+    - Patient reference (the patient they are related to)
+    - Relationship type (spouse, child, parent, etc.)
+    - Personal information (name, gender, birth date)
+    - Contact information (when available)
+
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR RelatedPerson resource.
+    """
+    return await search_related_persons(count=count)
+
 
 @mcp.tool()
 async def get_insurance_plan(insurance_plan_id: str) -> Dict[str, Any]:
@@ -838,7 +903,14 @@ async def search_allergy_intolerances(
 ) -> List[Dict[str, Any]]:
     """Search for allergy intolerances.
 
-    Searches for allergy and intolerance records for a specific patient.
+    Searches for allergy and intolerance records for a specific patient. AllergyIntolerance resources contain
+    detailed information about a patient's allergies and intolerances, including:
+    - Type (allergy, intolerance)
+    - Category (food, medication, environment, biologic)
+    - Criticality level (high, low, unable-to-assess)
+    - Specific allergen code and display text
+    - Patient reference
+    - Record date
 
     Args:
         patient: The ID of the patient to search for allergy intolerances.
@@ -859,6 +931,13 @@ async def search_all_allergy_intolerances(count: int = 10) -> List[Dict[str, Any
     """Get all allergy intolerances (no filters).
 
     Retrieves a list of all allergy intolerance resources from the FHIR server, without applying any filters.
+    AllergyIntolerance resources contain detailed information about patients' allergies and intolerances, including:
+    - Type (allergy, intolerance)
+    - Category (food, medication, environment, biologic)
+    - Criticality level (high, low, unable-to-assess)
+    - Specific allergen code and display text
+    - Patient reference
+    - Record date
 
     Args:
         count: The maximum number of results to return (default is 10).
@@ -941,6 +1020,54 @@ async def search_all_immunizations(count: int = 10) -> List[Dict[str, Any]]:
         A list of dictionaries, where each dictionary is a FHIR Immunization resource.
     """
     return await search_immunizations(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_locations(
+    name: str | None = None, address: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for locations (e.g., hospitals, pharmacies, clinics).
+
+    Searches for healthcare facility locations, which can be filtered by name or address.
+    Location resources contain detailed information about healthcare facilities, including:
+    - Facility name
+    - Address information (street, city, country)
+    - Managing organization reference
+    
+    Args:
+        name: The name of the location to search for.
+        address: The address or part of address to search for.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Location resource.
+    """
+    params = {"_count": count}
+    if name:
+        params["name"] = name
+    if address:
+        params["address"] = address
+    b = await _get_client().search("Location", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_locations(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all locations (no filters).
+
+    Retrieves a list of all location resources from the FHIR server, without applying any filters.
+    Location resources contain detailed information about healthcare facilities, including:
+    - Facility name
+    - Address information (street, city, country)
+    - Managing organization reference
+    
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR Location resource.
+    """
+    return await search_locations(count=count)  # type: ignore[arg-type]
 
 
 # ──────────────────────────────
