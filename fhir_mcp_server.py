@@ -1070,6 +1070,61 @@ async def search_all_locations(count: int = 10) -> List[Dict[str, Any]]:
     return await search_locations(count=count)  # type: ignore[arg-type]
 
 
+@mcp.tool()
+async def search_practitioner_roles(
+    practitioner: str | None = None, organization: str | None = None, specialty: str | None = None, count: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for practitioner roles (e.g., doctors at specific facilities).
+
+    Searches for practitioner roles, which link practitioners to organizations with specific roles.
+    PractitionerRole resources contain detailed information about healthcare providers' roles, including:
+    - Active status
+    - Practitioner reference (the healthcare provider)
+    - Organization reference (the healthcare facility)
+    - Role codes (doctor, nurse, etc.)
+    - Location references (where the practitioner works)
+    
+    Args:
+        practitioner: The ID of the practitioner to search for roles.
+        organization: The ID of the organization to search for practitioners.
+        specialty: The specialty code to search for.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR PractitionerRole resource.
+    """
+    params = {"_count": count}
+    if practitioner:
+        params["practitioner"] = practitioner
+    if organization:
+        params["organization"] = organization
+    if specialty:
+        params["specialty"] = specialty
+    b = await _get_client().search("PractitionerRole", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_practitioner_roles(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all practitioner roles (no filters).
+
+    Retrieves a list of all practitioner role resources from the FHIR server, without applying any filters.
+    PractitionerRole resources contain detailed information about healthcare providers' roles, including:
+    - Active status
+    - Practitioner reference (the healthcare provider)
+    - Organization reference (the healthcare facility)
+    - Role codes (doctor, nurse, etc.)
+    - Location references (where the practitioner works)
+    
+    Args:
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a FHIR PractitionerRole resource.
+    """
+    return await search_practitioner_roles(count=count)  # type: ignore[arg-type]
+
+
 # ──────────────────────────────
 # Entrypoint
 # ──────────────────────────────
