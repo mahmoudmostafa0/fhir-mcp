@@ -112,6 +112,14 @@ def _pt_summary(pt: Dict[str, Any]) -> str:
     return f"🆔 {pt.get('id','?')} | {_human_name(pt)} | DOB {pt.get('birthDate','?')} | {pt.get('gender','?')}"
 
 
+# def _practitioner_summary(practitioner: Dict[str, Any]) -> str:
+#     return f"🆔 {practitioner.get('id','?')} | {_human_name(practitioner)}"
+
+
+# def _organization_summary(org: Dict[str, Any]) -> str:
+#     return f"🆔 {org.get('id','?')} | {org.get('name', 'Unnamed Organization')} | Type: {org.get('type', [{}])[0].get('text', 'Unknown') if org.get('type') else 'Unknown'}"
+
+
 def _entries(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
     return bundle.get("entry", []) if bundle.get("resourceType") == "Bundle" else []
 
@@ -221,6 +229,18 @@ async def search_patients(name: str | None = None, family: str | None = None, co
 async def search_all_patients(count: int = 10) -> List[str]:
     """Get all patients (no filters)"""
     return await search_patients(count=count)  # type: ignore[arg-type]
+
+
+@mcp.tool()
+async def search_practitioners(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+    """Search for practitioners (doctors) in the FHIR server"""
+    params = {"_count": count}
+    if name:
+        params["name"] = name
+    if family:
+        params["family"] = family
+    b = await _get_client().search("Practitioner", **params)
+    return [(e["resource"]) for e in _entries(b)]
 
 
 @mcp.tool()
@@ -340,29 +360,29 @@ async def find_patients_with_conditions(code: str | None = None, count: int = 10
     return sorted(pids)
 
 
-@mcp.tool()
-async def assess_data_quality(resource_type: str | None = None) -> Dict[str, Any]:
-    """Assess the data quality and integrity of the FHIR server"""
-    resources = [resource_type] if resource_type else [
-        "Patient", "Observation", "Condition", "MedicationRequest"
-    ]
-    cli = _get_client()
-    report: Dict[str, Any] = {
-        "server": FHIR_BASE_URL,
-        "generated": datetime.utcnow().isoformat(),
-        "resources": {},
-    }
-    for rt in resources:
-        b = await cli.search(rt, _count=10)
-        entries = _entries(b)
-        total = b.get("total", len(entries))
-        orphan = 0
-        if rt == "Condition":
-            orphan = len(
-                {e["resource"]["subject"]["reference"].split("/")[-1] for e in entries if "subject" in e["resource"]}
-            )
-        report["resources"][rt] = {"total": total, "returned": len(entries), "orphan_refs_guess": orphan}
-    return report
+# @mcp.tool()
+# async def assess_data_quality(resource_type: str | None = None) -> Dict[str, Any]:
+#     """Assess the data quality and integrity of the FHIR server"""
+#     resources = [resource_type] if resource_type else [
+#         "Patient", "Observation", "Condition", "MedicationRequest", "Organization", "Coverage"
+#     ]
+#     cli = _get_client()
+#     report: Dict[str, Any] = {
+#         "server": FHIR_BASE_URL,
+#         "generated": datetime.utcnow().isoformat(),
+#         "resources": {},
+#     }
+#     for rt in resources:
+#         b = await cli.search(rt, _count=10)
+#         entries = _entries(b)
+#         total = b.get("total", len(entries))
+#         orphan = 0
+#         if rt == "Condition":
+#             orphan = len(
+#                 {e["resource"]["subject"]["reference"].split("/")[-1] for e in entries if "subject" in e["resource"]}
+#             )
+#         report["resources"][rt] = {"total": total, "returned": len(entries), "orphan_refs_guess": orphan}
+#     return report
 
 
 @mcp.tool()
@@ -469,6 +489,44 @@ async def search_medicines(
             "details": str(e),
             "query": medicine_name
         }
+
+
+@mcp.tool()
+async def search_organizations(name: str | None = None, identifier: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+    """Search for organizations in the FHIR server"""
+    params = {"_count": count}
+    if name:
+        params["name"] = name
+    if identifier:
+        params["identifier"] = identifier
+    b = await _get_client().search("Organization", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_organizations(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all organizations (no filters)"""
+    return await search_organizations(count=count)  # type: ignore[arg-type]
+
+
+
+
+@mcp.tool()
+async def search_coverages(patient: str | None = None, status: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+    """Search for coverage/insurance resources in the FHIR server"""
+    params = {"_count": count}
+    if patient:
+        params["beneficiary"] = patient
+    if status:
+        params["status"] = status
+    b = await _get_client().search("Coverage", **params)
+    return [(e["resource"]) for e in _entries(b)]
+
+
+@mcp.tool()
+async def search_all_coverages(count: int = 10) -> List[Dict[str, Any]]:
+    """Get all coverage/insurance resources (no filters)"""
+    return await search_coverages(count=count)  # type: ignore[arg-type]
 
 
 # ──────────────────────────────
