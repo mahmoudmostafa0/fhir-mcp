@@ -113,9 +113,6 @@ def _human_name(pt: Dict[str, Any]) -> str:
     return "Unknown"
 
 
-def _pt_summary(pt: Dict[str, Any]) -> str:
-    return f"🆔 {pt.get('id','?')} | {_human_name(pt)} | DOB {pt.get('birthDate','?')} | {pt.get('gender','?')}"
-
 
 # def _practitioner_summary(practitioner: Dict[str, Any]) -> str:
 #     return f"🆔 {practitioner.get('id','?')} | {_human_name(practitioner)}"
@@ -224,7 +221,7 @@ async def get_document_content(document_reference_id: str, extract_text: bool = 
 
 
 @mcp.tool()
-async def get_patient(patient_id: str) -> str:
+async def get_patient(patient_id: str) -> Dict[str, Any]:
     """Get a specific patient by their ID.
 
     Retrieves the full FHIR Patient resource for a given patient ID.
@@ -236,13 +233,13 @@ async def get_patient(patient_id: str) -> str:
         A dictionary representing the FHIR Patient resource.
     """
     r = await _get_client().get_patient(patient_id)
-    if r.get("resourceType") == "OperationOutcome":
-        return r["issue"][0]["details"]["text"]
-    return _pt_summary(r)
+    # if r.get("resourceType") == "OperationOutcome":
+    #     return r
+    return r
 
 
 @mcp.tool()
-async def search_patients(name: str | None = None, family: str | None = None, count: int = 10) -> List[str]:
+async def search_patients(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
     """Search for patients in the FHIR server.
 
     This tool allows searching for patients by their name, family name, or both.
@@ -261,11 +258,11 @@ async def search_patients(name: str | None = None, family: str | None = None, co
     if family:
         params["family"] = family
     b = await _get_client().search("Patient", **params)
-    return [_pt_summary(e["resource"]) for e in _entries(b)]
+    return [e["resource"] for e in _entries(b)]
 
 
 @mcp.tool()
-async def search_all_patients(count: int = 10) -> List[str]:
+async def search_all_patients(count: int = 10) -> List[Dict[str, Any]]:
     """Get all patients (no filters).
 
     Retrieves a list of all patient resources from the FHIR server, without applying any filters.
@@ -276,7 +273,7 @@ async def search_all_patients(count: int = 10) -> List[str]:
     Returns:
         A list of dictionaries, where each dictionary is a FHIR Patient resource.
     """
-    return await search_patients(count=count)  # type: ignore[arg-type]
+    return await search_patients(count=count)
 
 
 @mcp.tool()
