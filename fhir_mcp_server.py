@@ -1125,6 +1125,170 @@ async def search_all_practitioner_roles(count: int = 10) -> List[Dict[str, Any]]
     return await search_practitioner_roles(count=count)  # type: ignore[arg-type]
 
 
+
+@mcp.tool()
+async def active_medications(patient_id: str) -> (List[Dict[str, Any]], Optional[str]):
+    """
+    Retrieve the active Medications list and number of active medications for a given patient.
+
+    This tool fetches all MedicationRequest resources for the patient and counts the active ones.
+    While it does not make clinical decisions, the result may indicate polypharmacy if the count is high (bigger than 5).
+    you should alert the doctor if the count bigger than or equal 5 active Medications.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+
+    Returns:
+        A List of Medications and string indicating the number of active medications for the patient.
+    """
+    params = {"subject": f"Patient/{patient_id}"}
+    bundle = await _get_client().search("MedicationRequest", **params)
+    meds = [entry["resource"] for entry in _entries(bundle)]
+    active_meds = [m for m in meds if m.get("status") == "active"]
+
+    return active_meds, f"Patient is currently on {len(active_meds)} active medications."
+@mcp.tool()
+async def check_flu_vaccine(patient_id: str) -> Optional[str]:
+    """
+    Check if the patient received a flu shot within the last year.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+
+    Returns:
+        Message if overdue or None.
+    """
+    import datetime
+    one_year_ago = datetime.datetime.utcnow().date().isoformat()
+    params = {"patient": f"Patient/{patient_id}", "vaccine-code": "FLU"}  # Simplified
+    imm = [e["resource"] for e in _entries(await _get_client().search("Immunization", **params))]
+    for i in imm:
+        date = i.get("occurrenceDateTime")
+        if date and date >= one_year_ago:
+            return None
+    return "💉 No flu shot in over a year – annual immunization recommended."
+
+# ---------- Latest HbA1c Result ----------
+@mcp.tool()
+async def get_latest_hba1c(patient_id: str) -> Optional[str]:
+    """
+    Retrieve the latest HbA1c (hemoglobin A1c) result from the patient's observations.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+
+    Returns:
+        Most recent HbA1c value and date, or None if not found.
+    """
+    params = {"subject": f"Patient/{patient_id}", "code": "4548-4", "_sort": "-date", "_count": 1}  # LOINC for HbA1c
+    obs = [e["resource"] for e in _entries(await _get_client().search("Observation", **params))]
+    if obs:
+        val = obs[0].get("valueQuantity", {}).get("value")
+        date = obs[0].get("effectiveDateTime", "")
+        if val:
+            return f"🧪 Latest HbA1c: {val}% on {date}"
+    return None
+
+# ---------- BRCA1 or Family Cancer History ----------
+@mcp.tool()
+async def check_genetic_cancer_risk(patient_id: str) -> Optional[str]:
+    """
+    Assess the patient's risk of hereditary cancer based on BRCA1 variant or family history.
+
+    This function is used when a doctor wants to determine whether the patient may be at increased
+    risk of developing cancer (e.g., breast cancer) due to genetic factors or family history.
+    It checks two key sources:
+    1. MolecularSequence for known BRCA1 gene variants (indicating hereditary breast/ovarian cancer risk).
+    2. FamilyMemberHistory for relatives with recorded cancer conditions.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+
+    Returns:
+        A message alerting to potential cancer risk due to genetic predisposition or family history.
+        Returns None if no such indicators are found.
+    """
+    family = [e["resource"] for e in _entries(await _get_client().search("FamilyMemberHistory", patient=patient_id))]
+    risk_conditions = [f for f in family if "cancer" in f.get("condition", [{}])[0].get("code", {}).get("text", "").lower()]
+    sequences = [e["resource"] for e in _entries(await _get_client().search("MolecularSequence", patient=patient_id))]
+    brca = [s for s in sequences if "brca1" in s.get("referenceSeq", {}).get("referenceSeqId", {}).get("text", "").lower()]
+    if brca or risk_conditions:
+        return "🧬 BRCA1 variant or family cancer history detected – consider genetic counseling."
+    return None
+
+
+# ---------- Early Heart Disease in Family ----------
+@mcp.tool()
+async def check_family_heart_history(patient_id: str) -> Optional[str]:
+    """
+    Check if the patient may be at risk for heart disease based on family history.
+
+    This tool searches the FamilyMemberHistory resource to determine whether
+    any close relatives had early-onset heart disease (before age 60).
+    If found, it suggests that the patient may be at elevated risk and may benefit
+    from preventive screening like LDL cholesterol testing.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+
+    Returns:
+        A message if early-onset heart disease is detected in the family history, otherwise None.
+    """
+    family = [e["resource"] for e in _entries(await _get_client().search("FamilyMemberHistory", patient=patient_id))]
+    for f in family:
+        condition = f.get("condition", [{}])[0].get("code", {}).get("text", "").lower()
+        onset = f.get("condition", [{}])[0].get("onsetAge", {}).get("value", 100)
+        if "heart" in condition and onset < 60:
+            return "🫀 Family history shows early-onset heart disease – suggest LDL screening every 6 months."
+    return None
+
+@mcp.tool()
+async def get_vital_history(patient_id: str, vital_type: str = "blood_pressure") -> Optional[Dict[str, List[Dict[str, str]]]]:
+    """
+    Fetch historical vital sign data (blood pressure or glucose) for visualization.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+        vital_type: Type of vital to fetch: 'blood_pressure' or 'glucose'.
+
+    Returns:
+        A dictionary containing a list of value/date pairs for plotting.
+    """
+    if vital_type == "blood_pressure":
+        code = "85354-9"  # LOINC panel for BP
+    elif vital_type == "glucose":
+        code = "2339-0"  # LOINC for Glucose [Mass/volume] in Blood
+    else:
+        return None
+
+    params = {
+        "subject": f"Patient/{patient_id}",
+        "code": code,
+        "_sort": "-date",
+        "_count": 20
+    }
+
+    obs = [e["resource"] for e in _entries(await _get_client().search("Observation", **params))]
+    history = []
+
+    for o in obs:
+        date = o.get("effectiveDateTime")
+        if vital_type == "blood_pressure":
+            for comp in o.get("component", []):
+                coding = comp.get("code", {}).get("coding", [{}])[0].get("code")
+                value = comp.get("valueQuantity", {}).get("value")
+                label = "Systolic" if coding == "8480-6" else "Diastolic" if coding == "8462-4" else None
+                if label and value:
+                    history.append({"label": label, "value": value, "date": date})
+        else:
+            value = o.get("valueQuantity", {}).get("value")
+            if value:
+                history.append({"label": "Glucose", "value": value, "date": date})
+
+    if not history:
+        return None
+    return {"data": history}
+
 # ──────────────────────────────
 # Entrypoint
 # ──────────────────────────────
