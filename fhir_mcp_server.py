@@ -1150,17 +1150,21 @@ async def active_medications(patient_id: str) -> (List[Dict[str, Any]], Optional
 @mcp.tool()
 async def check_flu_vaccine(patient_id: str) -> Optional[str]:
     """
-    Check if the patient received a flu shot within the last year.
+    Determine if the patient has received a flu vaccination within the past year.
+
+    This function helps clinicians check the patient's immunization history for an annual flu vaccine.
+    It uses the FHIR Immunization resource to search for any influenza vaccine records. If no such
+    record is found in the past 12 months, the function returns a recommendation to vaccinate.
 
     Args:
         patient_id: The FHIR Patient resource ID.
 
     Returns:
-        Message if overdue or None.
+        A reminder message if the patient is overdue for a flu shot, or None if they are up to date.
     """
     import datetime
     one_year_ago = datetime.datetime.utcnow().date().isoformat()
-    params = {"patient": f"Patient/{patient_id}", "vaccine-code": "FLU"}  # Simplified
+    params = {"patient": f"Patient/{patient_id}", "vaccine-code": "FLU"}  # Simplified placeholder code
     imm = [e["resource"] for e in _entries(await _get_client().search("Immunization", **params))]
     for i in imm:
         date = i.get("occurrenceDateTime")
@@ -1168,19 +1172,30 @@ async def check_flu_vaccine(patient_id: str) -> Optional[str]:
             return None
     return "💉 No flu shot in over a year – annual immunization recommended."
 
+
 # ---------- Latest HbA1c Result ----------
 @mcp.tool()
 async def get_latest_hba1c(patient_id: str) -> Optional[str]:
     """
-    Retrieve the latest HbA1c (hemoglobin A1c) result from the patient's observations.
+    Retrieve the most recent HbA1c (hemoglobin A1c) lab result for diabetes monitoring.
+
+    This function is useful for doctors tracking blood sugar control in diabetic or prediabetic patients.
+    It queries the FHIR Observation resource for the HbA1c LOINC code (4548-4) and returns the most
+    recent test result. HbA1c reflects average blood glucose levels over the last ~3 months.
 
     Args:
         patient_id: The FHIR Patient resource ID.
 
     Returns:
-        Most recent HbA1c value and date, or None if not found.
+        A string containing the most recent HbA1c value and its test date,
+        or None if no such record is found.
     """
-    params = {"subject": f"Patient/{patient_id}", "code": "4548-4", "_sort": "-date", "_count": 1}  # LOINC for HbA1c
+    params = {
+        "subject": f"Patient/{patient_id}",
+        "code": "4548-4",  # LOINC for Hemoglobin A1c
+        "_sort": "-date",
+        "_count": 1
+    }
     obs = [e["resource"] for e in _entries(await _get_client().search("Observation", **params))]
     if obs:
         val = obs[0].get("valueQuantity", {}).get("value")
@@ -1188,6 +1203,7 @@ async def get_latest_hba1c(patient_id: str) -> Optional[str]:
         if val:
             return f"🧪 Latest HbA1c: {val}% on {date}"
     return None
+
 
 # ---------- BRCA1 or Family Cancer History ----------
 @mcp.tool()
