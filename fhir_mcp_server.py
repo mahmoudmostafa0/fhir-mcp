@@ -1131,7 +1131,7 @@ async def search_all_practitioner_roles(count: int = 10) -> List[Dict[str, Any]]
 
 
 @mcp.tool()
-async def active_medications(patient_id: str) -> (List[Dict[str, Any]], Optional[str]):
+async def active_medications(patient_id: str) -> Dict[str, Any]:
     """
     Retrieve the active Medications list and number of active medications for a given patient.
 
@@ -1143,14 +1143,19 @@ async def active_medications(patient_id: str) -> (List[Dict[str, Any]], Optional
         patient_id: The FHIR Patient resource ID.
 
     Returns:
-        A List of Medications and string indicating the number of active medications for the patient.
+        A dictionary containing the list of active medications and a summary message.
     """
     params = {"subject": f"Patient/{patient_id}"}
     bundle = await _get_client().search("MedicationRequest", **params)
     meds = [entry["resource"] for entry in _entries(bundle)]
     active_meds = [m for m in meds if m.get("status") == "active"]
 
-    return active_meds, f"Patient is currently on {len(active_meds)} active medications."
+    return {
+        "active_medications": active_meds,
+        "summary": f"Patient is currently on {len(active_meds)} active medications.",
+        "count": len(active_meds),
+        "polypharmacy_alert": len(active_meds) >= 5
+    }
 @mcp.tool()
 async def check_flu_vaccine(patient_id: str) -> Optional[str]:
     """
@@ -1348,7 +1353,7 @@ async def create_appointment(
                 "details": {"text": "Both start_time and end_time are required for creating an appointment."}
             }]
         }
-    
+
     # Create the appointment resource
     appointment = {
         "resourceType": "Appointment",
@@ -1364,11 +1369,11 @@ async def create_appointment(
             }
         ]
     }
-    
+
     # Add optional fields if provided
     if description:
         appointment["description"] = description
-    
+
     if appointment_type:
         appointment["appointmentType"] = {
             "coding": [
@@ -1378,7 +1383,7 @@ async def create_appointment(
                 }
             ]
         }
-    
+
     # Add practitioner if provided
     if practitioner_id:
         appointment["participant"].append({
@@ -1387,7 +1392,7 @@ async def create_appointment(
             },
             "status": "accepted"
         })
-    
+
     # Add location if provided
     if location_id:
         appointment["participant"].append({
@@ -1396,7 +1401,7 @@ async def create_appointment(
             },
             "status": "accepted"
         })
-    
+
     # Create the appointment in the FHIR server
     try:
         result = await _get_client().create("Appointment", appointment)
