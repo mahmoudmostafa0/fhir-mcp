@@ -79,6 +79,10 @@ class FHIRClient:
 
     async def search(self, rt: str, **params: Any) -> Dict[str, Any]:
         return await self._req("GET", rt, params=params)
+        
+    async def create(self, resource_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new FHIR resource."""
+        return await self._req("POST", resource_type, json=data)
 
 
 # ──────────────────────────────
@@ -1124,6 +1128,108 @@ async def search_all_practitioner_roles(count: int = 10) -> List[Dict[str, Any]]
     """
     return await search_practitioner_roles(count=count)  # type: ignore[arg-type]
 
+
+@mcp.tool()
+async def create_appointment(
+    patient_id: str,
+    practitioner_id: str | None = None,
+    start_time: str = None,
+    end_time: str = None,
+    status: str = "booked",
+    description: str | None = None,
+    appointment_type: str | None = None,
+    location_id: str | None = None
+) -> Dict[str, Any]:
+    """Create a new appointment in the FHIR server.
+
+    Creates a new appointment resource with the specified details. The appointment
+    will be linked to the specified patient and optionally to a practitioner.
+
+    Args:
+        patient_id: The ID of the patient for whom the appointment is being created.
+        practitioner_id: The ID of the practitioner (doctor) for the appointment.
+        start_time: The start time of the appointment in ISO format (e.g., '2025-07-15T10:00:00Z').
+        end_time: The end time of the appointment in ISO format (e.g., '2025-07-15T10:30:00Z').
+        status: The status of the appointment (e.g., 'booked', 'proposed', 'arrived').
+        description: A description or reason for the appointment.
+        appointment_type: The type of appointment (e.g., 'checkup', 'emergency').
+        location_id: The ID of the location where the appointment will take place.
+
+    Returns:
+        A dictionary representing the created FHIR Appointment resource.
+    """
+    # Validate required parameters
+    if not start_time or not end_time:
+        return {
+            "resourceType": "OperationOutcome",
+            "issue": [{
+                "severity": "error",
+                "code": "invalid",
+                "details": {"text": "Both start_time and end_time are required for creating an appointment."}
+            }]
+        }
+    
+    # Create the appointment resource
+    appointment = {
+        "resourceType": "Appointment",
+        "status": status,
+        "start": start_time,
+        "end": end_time,
+        "participant": [
+            {
+                "actor": {
+                    "reference": f"Patient/{patient_id}"
+                },
+                "status": "accepted"
+            }
+        ]
+    }
+    
+    # Add optional fields if provided
+    if description:
+        appointment["description"] = description
+    
+    if appointment_type:
+        appointment["appointmentType"] = {
+            "coding": [
+                {
+                    "system": "http://terminology.hl7.org/CodeSystem/v2-0276",
+                    "code": appointment_type
+                }
+            ]
+        }
+    
+    # Add practitioner if provided
+    if practitioner_id:
+        appointment["participant"].append({
+            "actor": {
+                "reference": f"Practitioner/{practitioner_id}"
+            },
+            "status": "accepted"
+        })
+    
+    # Add location if provided
+    if location_id:
+        appointment["participant"].append({
+            "actor": {
+                "reference": f"Location/{location_id}"
+            },
+            "status": "accepted"
+        })
+    
+    # Create the appointment in the FHIR server
+    try:
+        result = await _get_client().create("Appointment", appointment)
+        return result
+    except Exception as e:
+        return {
+            "resourceType": "OperationOutcome",
+            "issue": [{
+                "severity": "error",
+                "code": "exception",
+                "details": {"text": f"Error creating appointment: {str(e)}"}
+            }]
+        }
 
 # ──────────────────────────────
 # Entrypoint
