@@ -1231,6 +1231,22 @@ async def create_appointment(
             }]
         }
 
+
+@mcp.tool()
+async def get_practitioner(practitioner_id: str) -> Dict[str, Any]:
+    """Get a specific practitioner by their ID.
+
+    Retrieves the full FHIR Practitioner resource for a given practitioner ID.
+
+    Args:
+        practitioner_id: The logical ID of the practitioner to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR Practitioner resource.
+    """
+    r = await _get_client()._req("GET", f"Practitioner/{practitioner_id}")
+    return r
+
 # ──────────────────────────────
 # Entrypoint
 # ──────────────────────────────
