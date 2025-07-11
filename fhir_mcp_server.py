@@ -293,24 +293,34 @@ async def get_patient(patient_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def search_patients(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
-    """Search for patients in the FHIR server.
+async def search_patients(first_name: str | None = None, family_name: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+    """
+    Search for patients in the FHIR server and return Patient resources.
 
-    This tool allows searching for patients by their name, family name, or both.
+    This function performs a single search query using the provided given name and/or family name
+    against the FHIR Patient resource. It supports partial matching (default FHIR behavior),
+    allowing users to find patients even if only part of the name is known.
+    and it returns id,name, contact information, gender, birth date, address, marital status, and emergency contacts.
+
+    Additional FHIR Patient fields may also be present depending on the server's data.
+
+    Note:
+        Multiple variations of name and family name may be tried across several invocations
+        to improve match coverage. This function itself performs only a single query per call.
 
     Args:
-        name: The patient's given name to search for.
-        family: The patient's family name to search for.
+        first_name: The patient's given first name to search for (optional, partial allowed).
+        family_name: The patient's family name to search for (optional, partial allowed).
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Patient resource.
+        A list of dictionaries, each representing a FHIR Patient resource extracted from the Bundle response.
     """
     params = {"_count": count}
-    if name:
-        params["name"] = name
-    if family:
-        params["family"] = family
+    if first_name:
+        params["name"] = first_name
+    if family_name:
+        params["family"] = family_name
     b = await _get_client().search("Patient", **params)
     return [e["resource"] for e in _entries(b)]
 
@@ -1172,7 +1182,7 @@ async def search_all_immunizations(count: int = 10) -> List[Dict[str, Any]]:
 
 @mcp.tool()
 async def search_locations(
-    name: str | None = None, address: str | None = None, count: int = 10
+    name_query: str | None = None, address_query: str | None = None, count: int = 10
 ) -> List[Dict[str, Any]]:
     """Search for locations (e.g., hospitals, pharmacies, clinics).
 
@@ -1183,18 +1193,18 @@ async def search_locations(
     - Managing organization reference
     
     Args:
-        name: The name of the location to search for.
-        address: The address or part of address to search for.
+        name_query: A portion of the location's name or alias to search for.
+        address_query: A server defined search that may match one of the string fields in the Address, including line, city, district, state, country, postalCode, and/or text
         count: The maximum number of results to return (default is 10).
 
     Returns:
         A list of dictionaries, where each dictionary is a FHIR Location resource.
     """
     params = {"_count": count}
-    if name:
-        params["name"] = name
-    if address:
-        params["address"] = address
+    if name_query:
+        params["name"] = name_query
+    if address_query:
+        params["address"] = address_query
     b = await _get_client().search("Location", **params)
     return [(e["resource"]) for e in _entries(b)]
 
