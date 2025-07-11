@@ -683,8 +683,6 @@ async def search_all_organizations(count: int = 10) -> List[Dict[str, Any]]:
     return await search_organizations(count=count)  # type: ignore[arg-type]
 
 
-
-
 @mcp.tool()
 async def search_coverages(patient: str | None = None, status: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
     """Search for coverage/insurance resources in the FHIR server.
@@ -818,7 +816,7 @@ async def search_insurance_plans(
     Searches for insurance plans, which contain comprehensive details about insurance products, including:
     - Plan name and status (active/inactive)
     - Owning and administering organizations
-    - Network of providers (hospitals, pharmacies, etc.) with their references
+    - Network of providers (hospitals, pharmacies, etc.)
     - Plan type (medical, dental, etc.)
     - Specific costs and benefits by category (hospital services, pharmacy, etc.)
     - Copayment percentages and other cost-sharing details
@@ -1414,18 +1412,221 @@ async def create_appointment(
 
 @mcp.tool()
 async def get_practitioner(practitioner_id: str) -> Dict[str, Any]:
-    """Get a specific practitioner by their ID.
+    """Get a specific practitioner (doctor) by their ID.
 
-    Retrieves the full FHIR Practitioner resource for a given practitioner ID.
+    Retrieves the full FHIR Practitioner (doctor) resource for a given practitioner ID.
 
     Args:
-        practitioner_id: The logical ID of the practitioner to retrieve.
+        practitioner_id: The logical ID of the practitioner (doctor) to retrieve.
 
     Returns:
-        A dictionary representing the FHIR Practitioner resource.
+        A dictionary representing the FHIR Practitioner (doctor) resource.
     """
     r = await _get_client()._req("GET", f"Practitioner/{practitioner_id}")
     return r
+
+@mcp.tool()
+async def get_organization(organization_id: str) -> Dict[str, Any]:
+    """
+    Get a specific organization by its ID.
+
+    Retrieves the full FHIR Organization resource for a given organization ID.
+    Organization resources represent healthcare entities such as hospitals, clinics, pharmacies, and insurance companies.
+    They include details such as name, type, contact information, and address.
+
+    Args:
+        organization_id: The logical ID of the organization to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR Organization resource.
+
+    Example Response:
+        {
+            "resourceType": "Organization",
+            "id": "605989",
+            "meta": {...},
+            "type": [...],
+            "name": "Nile Med Hospital",
+            "telecom": [...],
+            "address": [...]
+        }
+
+    Reference:
+        https://hl7.org/fhir/organization.html
+    """
+    return await _get_client()._req("GET", f"Organization/{organization_id}")
+
+
+@mcp.tool()
+async def get_practitioner_role(practitioner_role_id: str) -> Dict[str, Any]:
+    """
+    Get a specific practitioner (doctor) role by its ID.
+
+    Retrieves the full FHIR PractitionerRole resource for a given practitioner role ID.
+    PractitionerRole resources link practitioners (doctors) to organizations, specifying their roles,
+    specialties, and healthcare services provided. This helps identify which organization a doctor works in
+    and what health services they provide.
+
+    Args:
+        practitioner_role_id: The logical ID of the PractitionerRole to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR PractitionerRole resource.
+
+    Example Response:
+        {
+            "resourceType": "PractitionerRole",
+            "id": "606025",
+            "meta": {...},
+            "active": true,
+            "practitioner": {...},
+            "organization": {...},
+            "code": [...],
+            "specialty": [...],
+            "healthcareService": [...]
+        }
+
+    Reference:
+        https://hl7.org/fhir/practitionerrole.html
+    """
+    return await _get_client()._req("GET", f"PractitionerRole/{practitioner_role_id}")
+
+
+@mcp.tool()
+async def get_medication_statement(statement_id: str) -> Dict[str, Any]:
+    """
+    Get a specific medication statement by its ID.
+
+    Retrieves the full FHIR MedicationStatement resource for a given statement ID.
+    MedicationStatement resources record what medications a patient is taking, including status,
+    medication details, and effective period.
+
+    Args:
+        statement_id: The logical ID of the MedicationStatement to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR MedicationStatement resource.
+
+    Example Response:
+        {
+            "resourceType": "MedicationStatement",
+            "id": "606046",
+            "meta": {...},
+            "status": "active",
+            "medicationCodeableConcept": {...},
+            "subject": {...},
+            "effectivePeriod": {...}
+        }
+
+    Reference:
+        https://hl7.org/fhir/medicationstatement.html
+    """
+    return await _get_client()._req("GET", f"MedicationStatement/{statement_id}")
+
+
+@mcp.tool()
+async def search_medication_statements(patient_id: str, count: int = 10) -> Dict[str, Any]:
+    """
+    Search for medication statements for a specific patient.
+
+    Retrieves a bundle of FHIR MedicationStatement resources for the given patient ID.
+    Useful for listing all medications a patient is currently taking or has taken.
+
+    Args:
+        patient_id: The FHIR Patient resource ID.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A FHIR Bundle containing MedicationStatement resources.
+
+    Example Response:
+        {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "total": 1,
+            "entry": [
+                {
+                    "fullUrl": "...",
+                    "resource": {...}
+                }
+            ]
+        }
+
+    Reference:
+        https://hl7.org/fhir/medicationstatement.html
+    """
+    params = {"patient": patient_id, "_count": count}
+    return await _get_client().search("MedicationStatement", **params)
+
+
+@mcp.tool()
+async def search_healthcare_service(organization_id: str, count: int = 10) -> Dict[str, Any]:
+    """
+    Search for healthcare services provided by a specific organization.
+
+    Retrieves a bundle of FHIR HealthcareService resources for the given organization ID.
+    HealthcareService resources describe the specific services offered by healthcare organizations,
+    such as clinics, specialties, and available times.
+
+    Args:
+        organization_id: The FHIR Organization resource ID.
+        count: The maximum number of results to return (default is 10).
+
+    Returns:
+        A FHIR Bundle containing HealthcareService resources.
+
+    Example Response:
+        {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "total": 1,
+            "entry": [
+                {
+                    "fullUrl": "...",
+                    "resource": {...}
+                }
+            ]
+        }
+
+    Reference:
+        https://hl7.org/fhir/healthcareservice.html
+    """
+    params = {"organization": organization_id, "_count": count}
+    return await _get_client().search("HealthcareService", **params)
+
+
+@mcp.tool()
+async def get_healthcare_service(service_id: str) -> Dict[str, Any]:
+    """
+    Get a specific healthcare service by its ID.
+
+    Retrieves the full FHIR HealthcareService resource for a given service ID.
+    HealthcareService resources describe the details of a service offered by a healthcare organization,
+    including type, name, available times, and the organization providing the service.
+
+    Args:
+        service_id: The logical ID of the HealthcareService to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR HealthcareService resource.
+
+    Example Response:
+        {
+            "resourceType": "HealthcareService",
+            "id": "605990",
+            "meta": {...},
+            "providedBy": {...},
+            "type": [...],
+            "name": "Endocrinology Clinic",
+            "availableTime": [...]
+        }
+
+    Reference:
+        https://hl7.org/fhir/healthcareservice.html
+    """
+    return await _get_client()._req("GET", f"HealthcareService/{service_id}")
+
+# ...existing code...
 
 # ──────────────────────────────
 # Entrypoint
