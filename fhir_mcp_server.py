@@ -1151,8 +1151,8 @@ async def search_immunization(
     vaccine_code: str | None = None,
     manufacturer: str | None = None,
     lot_number: str | None = None,
-    _id: str | None = None,
-    _lastUpdated: str | None = None,
+    immun_id: str | None = None,
+    immun_lastUpdated: str | None = None,
     count: int = 10
 ) -> dict:
     """
@@ -1168,8 +1168,8 @@ async def search_immunization(
         vaccine_code: Vaccine CVX/SNOMED code (e.g., '140', 'http://hl7.org/fhir/sid/cvx|140').
         manufacturer: Search by vaccine manufacturer organization (e.g., 'Organization/123').
         lot_number: Search by lot number (e.g., 'FLU2024A').
-        _id: Search by resource ID (e.g., '606048').
-        _lastUpdated: Search by when the record was updated (e.g., 'ge2024-01-01').
+        immun_id: Search by resource ID (maps to FHIR parameter '_id', e.g., '606048').
+        immun_lastUpdated: Search by when the record was updated (maps to FHIR parameter '_lastUpdated', e.g., 'ge2024-01-01').
         count: The maximum number of results to return (default is 10).
 
     Returns:
@@ -1204,10 +1204,10 @@ async def search_immunization(
         params["manufacturer"] = manufacturer
     if lot_number:
         params["lot-number"] = lot_number
-    if _id:
-        params["_id"] = _id
-    if _lastUpdated:
-        params["_lastUpdated"] = _lastUpdated
+    if immun_id:
+        params["_id"] = immun_id
+    if immun_lastUpdated:
+        params["_lastUpdated"] = immun_lastUpdated
     return await _get_client().search("Immunization", **params)
 
 
