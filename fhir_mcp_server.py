@@ -282,9 +282,11 @@ async def search_all_patients(count: int = 10) -> List[Dict[str, Any]]:
 
 @mcp.tool()
 async def search_practitioners(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
-    """Search for practitioners (doctors) in the FHIR server.
+    """
+    Find *doctors* (FHIR **Practitioner** resources) on the connected FHIR server.
 
-    This tool allows searching for practitioners by their name, family name, or both.
+    In FHIR, a “Practitioner” represents a healthcare professional, This helper queries
+    the Practitioner endpoint using the standard search parameters 
 
     Args:
         name: The practitioner's given name to search for.
