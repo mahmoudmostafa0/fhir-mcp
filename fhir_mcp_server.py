@@ -122,8 +122,58 @@ def _human_name(pt: Dict[str, Any]) -> str:
 #     return f"🆔 {practitioner.get('id','?')} | {_human_name(practitioner)}"
 
 
-# def _organization_summary(org: Dict[str, Any]) -> str:
-#     return f"🆔 {org.get('id','?')} | {org.get('name', 'Unnamed Organization')} | Type: {org.get('type', [{}])[0].get('text', 'Unknown') if org.get('type') else 'Unknown'}"
+def _format_organization(org: Dict[str, Any]) -> Dict[str, Any]:
+    """Format an organization resource to a more concise representation."""
+    # Extract organization type if available
+    org_type = None
+    if org.get('type') and len(org.get('type', [])) > 0:
+        type_coding = org.get('type', [{}])[0].get('coding', [])
+        if type_coding and len(type_coding) > 0:
+            org_type = type_coding[0].get('display')
+    
+    # Extract contact information
+    contact_info = {}
+    for telecom in org.get('telecom', []):
+        system = telecom.get('system')
+        if system:
+            contact_info[system] = telecom.get('value')
+    
+    # Extract address information
+    address_info = None
+    if org.get('address') and len(org.get('address', [])) > 0:
+        addr = org.get('address', [{}])[0]
+        address_info = {
+            'line': addr.get('line', []),
+            'city': addr.get('city'),
+            'state': addr.get('state'),
+            'postalCode': addr.get('postalCode'),
+            'country': addr.get('country')
+        }
+    
+    # Create formatted organization
+    formatted_org = {
+        'id': org.get('id'),
+        'name': org.get('name', 'Unnamed Organization'),
+        'active': org.get('active', True),
+        'type': org_type
+    }
+    
+    # Add contact info if available
+    if contact_info:
+        formatted_org['contact'] = contact_info
+    
+    # Add address if available
+    if address_info:
+        formatted_org['address'] = address_info
+    
+    # Add identifiers if available
+    if org.get('identifier'):
+        formatted_org['identifiers'] = [{
+            'system': identifier.get('system'),
+            'value': identifier.get('value')
+        } for identifier in org.get('identifier', [])]
+    
+    return formatted_org
 
 
 def _entries(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -243,24 +293,34 @@ async def get_patient(patient_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def search_patients(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
-    """Search for patients in the FHIR server.
+async def search_patients(first_name: str | None = None, family_name: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+    """
+    Search for patients in the FHIR server and return Patient resources.
 
-    This tool allows searching for patients by their name, family name, or both.
+    This function performs a single search query using the provided given name and/or family name
+    against the FHIR Patient resource. It supports partial matching (default FHIR behavior),
+    allowing users to find patients even if only part of the name is known.
+    and it returns id,name, contact information, gender, birth date, address, marital status, and emergency contacts.
+
+    Additional FHIR Patient fields may also be present depending on the server's data.
+
+    Note:
+        Multiple variations of name and family name may be tried across several invocations
+        to improve match coverage. This function itself performs only a single query per call.
 
     Args:
-        name: The patient's given name to search for.
-        family: The patient's family name to search for.
+        first_name: The patient's given first name to search for (optional, partial allowed).
+        family_name: The patient's family name to search for (optional, partial allowed).
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Patient resource.
+        A list of dictionaries, each representing a FHIR Patient resource extracted from the Bundle response.
     """
     params = {"_count": count}
-    if name:
-        params["name"] = name
-    if family:
-        params["family"] = family
+    if first_name:
+        params["name"] = first_name
+    if family_name:
+        params["family"] = family_name
     b = await _get_client().search("Patient", **params)
     return [e["resource"] for e in _entries(b)]
 
@@ -285,13 +345,8 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
     """
     Find *doctors* (FHIR **Practitioner** resources) on the connected FHIR server.
 
-    In FHIR, a "Practitioner" represents a healthcare professional. This helper queries
-    the Practitioner endpoint using the standard search parameters. Practitioner resources contain
-    detailed information about healthcare providers, including:
-    - Personal information (name, gender, birth date)
-    - Contact information (phone, email)
-    - Professional qualifications and specialties
-    - National identifiers
+    In FHIR, a "Practitioner" represents a healthcare professional, This helper queries
+    the Practitioner endpoint using the standard search parameters 
 
     Args:
         name: The practitioner's given name to search for.
@@ -307,7 +362,94 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
     if family:
         params["family"] = family
     b = await _get_client().search("Practitioner", **params)
-    return [(e["resource"]) for e in _entries(b)]
+    practitioners = []
+    
+    for entry in _entries(b):
+        resource = entry["resource"]
+        practitioner_info = {
+            "id": resource.get("id", ""),
+            "active": resource.get("active", False)
+        }
+        
+        # Extract name information
+        if resource.get("name") and len(resource["name"]) > 0:
+            name_data = resource["name"][0]
+            full_name = ""
+            
+            # Add prefix if available
+            if name_data.get("prefix"):
+                full_name += f"{name_data['prefix'][0]} "
+                
+            # Add given name if available
+            if name_data.get("given"):
+                full_name += f"{name_data['given'][0]} "
+                
+            # Add family name if available
+            if name_data.get("family"):
+                full_name += name_data["family"]
+                
+            practitioner_info["name"] = full_name.strip()
+        
+        # Extract contact information
+        if resource.get("telecom") and len(resource["telecom"]) > 0:
+            for contact in resource["telecom"]:
+                if contact.get("system") and contact.get("value"):
+                    practitioner_info[contact["system"]] = contact["value"]
+        
+        # Extract address information
+        if resource.get("address") and len(resource["address"]) > 0:
+            address = resource["address"][0]
+            address_parts = []
+            
+            if address.get("line"):
+                address_parts.extend(address["line"])
+            if address.get("city"):
+                address_parts.append(address["city"])
+            if address.get("state"):
+                address_parts.append(address["state"])
+            if address.get("postalCode"):
+                address_parts.append(address["postalCode"])
+            if address.get("country"):
+                address_parts.append(address["country"])
+                
+            practitioner_info["address"] = ", ".join(address_parts)
+        
+        # Extract gender
+        if resource.get("gender"):
+            practitioner_info["gender"] = resource["gender"]
+            
+        # Extract identifier (like NPI)
+        if resource.get("identifier") and len(resource["identifier"]) > 0:
+            for identifier in resource["identifier"]:
+                if identifier.get("system") and identifier.get("value"):
+                    system_name = identifier["system"].split("/")[-1] if "/" in identifier["system"] else identifier["system"]
+                    practitioner_info[f"identifier_{system_name}"] = identifier["value"]
+        
+        # Extract birth date
+        if resource.get("birthDate"):
+            practitioner_info["birthDate"] = resource["birthDate"]
+        
+        # Extract qualifications
+        if resource.get("qualification") and len(resource["qualification"]) > 0:
+            qualifications = []
+            for qual in resource["qualification"]:
+                if qual.get("code"):
+                    # Try to get text description first
+                    if qual["code"].get("text"):
+                        qualifications.append(qual["code"]["text"])
+                    # Otherwise try to get display from coding
+                    elif qual["code"].get("coding") and len(qual["code"]["coding"]) > 0:
+                        for coding in qual["code"]["coding"]:
+                            if coding.get("display"):
+                                qualifications.append(coding["display"])
+                                break
+            
+            if qualifications:
+                practitioner_info["qualifications"] = qualifications
+        
+        practitioners.append(practitioner_info)
+    
+    return practitioners
 
 
 @mcp.tool()
@@ -653,7 +795,7 @@ async def search_medicines(
 
 
 @mcp.tool()
-async def search_organizations(name: str | None = None, identifier: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+async def search_organizations(name: str | None = None, identifier: str | None = None, count: int = 10) -> Dict[str, Any]:
     """Search for organizations in the FHIR server.
 
     Searches for healthcare organizations, which can be filtered by name or identifier.
@@ -664,7 +806,7 @@ async def search_organizations(name: str | None = None, identifier: str | None =
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Organization resource.
+        A dictionary containing total count and a list of formatted organization resources.
     """
     params = {"_count": count}
     if name:
@@ -672,11 +814,18 @@ async def search_organizations(name: str | None = None, identifier: str | None =
     if identifier:
         params["identifier"] = identifier
     b = await _get_client().search("Organization", **params)
-    return [(e["resource"]) for e in _entries(b)]
+    entries = _entries(b)
+    
+    # Format the response
+    return {
+        "total": b.get("total", len(entries)),
+        "count": len(entries),
+        "organizations": [_format_organization(e["resource"]) for e in entries]
+    }
 
 
 @mcp.tool()
-async def search_all_organizations(count: int = 10) -> List[Dict[str, Any]]:
+async def search_all_organizations(count: int = 10) -> Dict[str, Any]:
     """Get all organizations (no filters).
 
     Retrieves a list of all organization resources from the FHIR server, without applying any filters.
@@ -685,9 +834,9 @@ async def search_all_organizations(count: int = 10) -> List[Dict[str, Any]]:
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Organization resource.
+        A dictionary containing total count and a list of formatted organization resources.
     """
-    return await search_organizations(count=count)  # type: ignore[arg-type]
+    return await search_organizations(count=count)
 
 
 @mcp.tool()
@@ -1147,7 +1296,7 @@ async def search_all_immunizations(count: int = 10) -> List[Dict[str, Any]]:
 
 @mcp.tool()
 async def search_locations(
-    name: str | None = None, address: str | None = None, count: int = 10
+    name_query: str | None = None, address_query: str | None = None, count: int = 10
 ) -> List[Dict[str, Any]]:
     """Search for locations (e.g., hospitals, pharmacies, clinics).
 
@@ -1158,18 +1307,18 @@ async def search_locations(
     - Managing organization reference
     
     Args:
-        name: The name of the location to search for.
-        address: The address or part of address to search for.
+        name_query: A portion of the location's name or alias to search for.
+        address_query: A server defined search that may match one of the string fields in the Address, including line, city, district, state, country, postalCode, and/or text
         count: The maximum number of results to return (default is 10).
 
     Returns:
         A list of dictionaries, where each dictionary is a FHIR Location resource.
     """
     params = {"_count": count}
-    if name:
-        params["name"] = name
-    if address:
-        params["address"] = address
+    if name_query:
+        params["name"] = name_query
+    if address_query:
+        params["address"] = address_query
     b = await _get_client().search("Location", **params)
     return [(e["resource"]) for e in _entries(b)]
 
@@ -1562,25 +1711,11 @@ async def get_organization(organization_id: str) -> Dict[str, Any]:
 
     Args:
         organization_id: The logical ID of the organization to retrieve.
-
-    Returns:
-        A dictionary representing the FHIR Organization resource.
-
-    Example Response:
-        {
-            "resourceType": "Organization",
-            "id": "605989",
-            "meta": {...},
-            "type": [...],
-            "name": "Nile Med Hospital",
-            "telecom": [...],
-            "address": [...]
-        }
-
-    Reference:
-        https://hl7.org/fhir/organization.html
     """
-    return await _get_client()._req("GET", f"Organization/{organization_id}")
+    org = await _get_client()._req("GET", f"Organization/{organization_id}")
+    if org.get("resourceType") == "Organization":
+        return _format_organization(org)
+    return org
 
 
 @mcp.tool()
@@ -1595,25 +1730,6 @@ async def get_practitioner_role(practitioner_role_id: str) -> Dict[str, Any]:
 
     Args:
         practitioner_role_id: The logical ID of the PractitionerRole to retrieve.
-
-    Returns:
-        A dictionary representing the FHIR PractitionerRole resource.
-
-    Example Response:
-        {
-            "resourceType": "PractitionerRole",
-            "id": "606025",
-            "meta": {...},
-            "active": true,
-            "practitioner": {...},
-            "organization": {...},
-            "code": [...],
-            "specialty": [...],
-            "healthcareService": [...]
-        }
-
-    Reference:
-        https://hl7.org/fhir/practitionerrole.html
     """
     return await _get_client()._req("GET", f"PractitionerRole/{practitioner_role_id}")
 
@@ -1629,23 +1745,6 @@ async def get_medication_statement(statement_id: str) -> Dict[str, Any]:
 
     Args:
         statement_id: The logical ID of the MedicationStatement to retrieve.
-
-    Returns:
-        A dictionary representing the FHIR MedicationStatement resource.
-
-    Example Response:
-        {
-            "resourceType": "MedicationStatement",
-            "id": "606046",
-            "meta": {...},
-            "status": "active",
-            "medicationCodeableConcept": {...},
-            "subject": {...},
-            "effectivePeriod": {...}
-        }
-
-    Reference:
-        https://hl7.org/fhir/medicationstatement.html
     """
     return await _get_client()._req("GET", f"MedicationStatement/{statement_id}")
 
@@ -1662,24 +1761,6 @@ async def search_medication_statements(patient_id: str, count: int = 10) -> Dict
         patient_id: The FHIR Patient resource ID.
         count: The maximum number of results to return (default is 10).
 
-    Returns:
-        A FHIR Bundle containing MedicationStatement resources.
-
-    Example Response:
-        {
-            "resourceType": "Bundle",
-            "type": "searchset",
-            "total": 1,
-            "entry": [
-                {
-                    "fullUrl": "...",
-                    "resource": {...}
-                }
-            ]
-        }
-
-    Reference:
-        https://hl7.org/fhir/medicationstatement.html
     """
     params = {"patient": patient_id, "_count": count}
     return await _get_client().search("MedicationStatement", **params)
@@ -1693,29 +1774,6 @@ async def search_healthcare_service(organization_id: str, count: int = 10) -> Di
     Retrieves a bundle of FHIR HealthcareService resources for the given organization ID.
     HealthcareService resources describe the specific services offered by healthcare organizations,
     such as clinics, specialties, and available times.
-
-    Args:
-        organization_id: The FHIR Organization resource ID.
-        count: The maximum number of results to return (default is 10).
-
-    Returns:
-        A FHIR Bundle containing HealthcareService resources.
-
-    Example Response:
-        {
-            "resourceType": "Bundle",
-            "type": "searchset",
-            "total": 1,
-            "entry": [
-                {
-                    "fullUrl": "...",
-                    "resource": {...}
-                }
-            ]
-        }
-
-    Reference:
-        https://hl7.org/fhir/healthcareservice.html
     """
     params = {"organization": organization_id, "_count": count}
     return await _get_client().search("HealthcareService", **params)
@@ -1732,27 +1790,9 @@ async def get_healthcare_service(service_id: str) -> Dict[str, Any]:
 
     Args:
         service_id: The logical ID of the HealthcareService to retrieve.
-
-    Returns:
-        A dictionary representing the FHIR HealthcareService resource.
-
-    Example Response:
-        {
-            "resourceType": "HealthcareService",
-            "id": "605990",
-            "meta": {...},
-            "providedBy": {...},
-            "type": [...],
-            "name": "Endocrinology Clinic",
-            "availableTime": [...]
-        }
-
-    Reference:
-        https://hl7.org/fhir/healthcareservice.html
     """
     return await _get_client()._req("GET", f"HealthcareService/{service_id}")
 
-# ...existing code...
 
 # ──────────────────────────────
 # Entrypoint
