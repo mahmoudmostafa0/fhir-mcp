@@ -285,8 +285,13 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
     """
     Find *doctors* (FHIR **Practitioner** resources) on the connected FHIR server.
 
-    In FHIR, a “Practitioner” represents a healthcare professional, This helper queries
-    the Practitioner endpoint using the standard search parameters 
+    In FHIR, a "Practitioner" represents a healthcare professional. This helper queries
+    the Practitioner endpoint using the standard search parameters. Practitioner resources contain
+    detailed information about healthcare providers, including:
+    - Personal information (name, gender, birth date)
+    - Contact information (phone, email)
+    - Professional qualifications and specialties
+    - National identifiers
 
     Args:
         name: The practitioner's given name to search for.
