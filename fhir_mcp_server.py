@@ -285,13 +285,8 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
     """
     Find *doctors* (FHIR **Practitioner** resources) on the connected FHIR server.
 
-    In FHIR, a "Practitioner" represents a healthcare professional. This helper queries
-    the Practitioner endpoint using the standard search parameters. Practitioner resources contain
-    detailed information about healthcare providers, including:
-    - Personal information (name, gender, birth date)
-    - Contact information (phone, email)
-    - Professional qualifications and specialties
-    - National identifiers
+    In FHIR, a "Practitioner" represents a healthcare professional, This helper queries
+    the Practitioner endpoint using the standard search parameters 
 
     Args:
         name: The practitioner's given name to search for.
@@ -307,7 +302,94 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
     if family:
         params["family"] = family
     b = await _get_client().search("Practitioner", **params)
-    return [(e["resource"]) for e in _entries(b)]
+    practitioners = []
+    
+    for entry in _entries(b):
+        resource = entry["resource"]
+        practitioner_info = {
+            "id": resource.get("id", ""),
+            "active": resource.get("active", False)
+        }
+        
+        # Extract name information
+        if resource.get("name") and len(resource["name"]) > 0:
+            name_data = resource["name"][0]
+            full_name = ""
+            
+            # Add prefix if available
+            if name_data.get("prefix"):
+                full_name += f"{name_data['prefix'][0]} "
+                
+            # Add given name if available
+            if name_data.get("given"):
+                full_name += f"{name_data['given'][0]} "
+                
+            # Add family name if available
+            if name_data.get("family"):
+                full_name += name_data["family"]
+                
+            practitioner_info["name"] = full_name.strip()
+        
+        # Extract contact information
+        if resource.get("telecom") and len(resource["telecom"]) > 0:
+            for contact in resource["telecom"]:
+                if contact.get("system") and contact.get("value"):
+                    practitioner_info[contact["system"]] = contact["value"]
+        
+        # Extract address information
+        if resource.get("address") and len(resource["address"]) > 0:
+            address = resource["address"][0]
+            address_parts = []
+            
+            if address.get("line"):
+                address_parts.extend(address["line"])
+            if address.get("city"):
+                address_parts.append(address["city"])
+            if address.get("state"):
+                address_parts.append(address["state"])
+            if address.get("postalCode"):
+                address_parts.append(address["postalCode"])
+            if address.get("country"):
+                address_parts.append(address["country"])
+                
+            practitioner_info["address"] = ", ".join(address_parts)
+        
+        # Extract gender
+        if resource.get("gender"):
+            practitioner_info["gender"] = resource["gender"]
+            
+        # Extract identifier (like NPI)
+        if resource.get("identifier") and len(resource["identifier"]) > 0:
+            for identifier in resource["identifier"]:
+                if identifier.get("system") and identifier.get("value"):
+                    system_name = identifier["system"].split("/")[-1] if "/" in identifier["system"] else identifier["system"]
+                    practitioner_info[f"identifier_{system_name}"] = identifier["value"]
+        
+        # Extract birth date
+        if resource.get("birthDate"):
+            practitioner_info["birthDate"] = resource["birthDate"]
+        
+        # Extract qualifications
+        if resource.get("qualification") and len(resource["qualification"]) > 0:
+            qualifications = []
+            for qual in resource["qualification"]:
+                if qual.get("code"):
+                    # Try to get text description first
+                    if qual["code"].get("text"):
+                        qualifications.append(qual["code"]["text"])
+                    # Otherwise try to get display from coding
+                    elif qual["code"].get("coding") and len(qual["code"]["coding"]) > 0:
+                        for coding in qual["code"]["coding"]:
+                            if coding.get("display"):
+                                qualifications.append(coding["display"])
+                                break
+            
+            if qualifications:
+                practitioner_info["qualifications"] = qualifications
+        
+        practitioners.append(practitioner_info)
+    
+    return practitioners
 
 
 @mcp.tool()
