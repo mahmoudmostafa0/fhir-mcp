@@ -995,25 +995,139 @@ async def search_all_procedures(count: int = 10) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
-async def search_immunizations(
-    patient: str | None = None, count: int = 10
-) -> List[Dict[str, Any]]:
-    """Search for immunization records.
+async def search_immunization(
+    patient: str | None = None,
+    date: str | None = None,
+    status: str | None = None,
+    vaccine_code: str | None = None,
+    manufacturer: str | None = None,
+    lot_number: str | None = None,
+    _id: str | None = None,
+    _lastUpdated: str | None = None,
+    count: int = 10
+) -> dict:
+    """
+    Search for Immunization resources using FHIR-compliant parameters.
 
-    Searches for immunization records for a specific patient.
+    This tool allows searching for Immunization records using a variety of FHIR search parameters, including patient reference, date, status, vaccine code, manufacturer, lot number, resource ID, and last updated timestamp.
+    See the [FHIR Immunization Search documentation](https://build.fhir.org/immunization.html#search) for parameter details.
 
     Args:
-        patient: The ID of the patient to search for immunization records.
+        patient: Search by patient reference (e.g., 'Patient/605982' or '605982').
+        date: Search by the date of immunization (e.g., '2024-01-01', 'ge2023-01-01&date=le2024-01-01').
+        status: Immunization status (e.g., 'completed', 'entered-in-error').
+        vaccine_code: Vaccine CVX/SNOMED code (e.g., '140', 'http://hl7.org/fhir/sid/cvx|140').
+        manufacturer: Search by vaccine manufacturer organization (e.g., 'Organization/123').
+        lot_number: Search by lot number (e.g., 'FLU2024A').
+        _id: Search by resource ID (e.g., '606048').
+        _lastUpdated: Search by when the record was updated (e.g., 'ge2024-01-01').
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Immunization resource.
+        A FHIR Bundle containing matching Immunization resources.
+
+    Example Response:
+        {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "total": 1,
+            "entry": [
+                {
+                    "fullUrl": "...",
+                    "resource": {...}
+                }
+            ]
+        }
+
+    Reference:
+        https://build.fhir.org/immunization.html
     """
     params = {"_count": count}
     if patient:
         params["patient"] = patient
-    b = await _get_client().search("Immunization", **params)
-    return [(e["resource"]) for e in _entries(b)]
+    if date:
+        params["date"] = date
+    if status:
+        params["status"] = status
+    if vaccine_code:
+        params["vaccine-code"] = vaccine_code
+    if manufacturer:
+        params["manufacturer"] = manufacturer
+    if lot_number:
+        params["lot-number"] = lot_number
+    if _id:
+        params["_id"] = _id
+    if _lastUpdated:
+        params["_lastUpdated"] = _lastUpdated
+    return await _get_client().search("Immunization", **params)
+
+
+@mcp.tool()
+async def get_immunization(immun_id: str) -> dict:
+    """
+    Get a specific Immunization resource by its ID.
+
+    Retrieves the full FHIR Immunization resource for a given immunization ID. The Immunization resource records details about the administration of a vaccine to a patient.
+
+    Args:
+        immun_id: The logical ID of the Immunization resource to retrieve.
+
+    Returns:
+        A dictionary representing the FHIR Immunization resource.
+
+    Example Response:
+        {
+            "resourceType": "Immunization",
+            "id": "606072",
+            "meta": {
+                "versionId": "1",
+                "lastUpdated": "2025-07-11T17:49:59.053+00:00",
+                "source": "#drukldXxpuR7msGX"
+            },
+            "status": "completed",
+            "vaccineCode": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/cvx",
+                        "code": "133",
+                        "display": "Pneumococcal conjugate vaccine (13-valent)"
+                    }
+                ]
+            },
+            "patient": {
+                "reference": "Patient/605982"
+            },
+            "occurrenceDateTime": "2022-09-20",
+            "recorded": "2022-09-20T14:15:00+02:00",
+            "primarySource": true,
+            "lotNumber": "PNM2022Z",
+            "site": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/v3-ActSite",
+                        "code": "LD",
+                        "display": "Left deltoid"
+                    }
+                ]
+            },
+            "route": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+                        "code": "IM",
+                        "display": "Intramuscular"
+                    }
+                ]
+            }
+        }
+
+    Reference:
+        https://build.fhir.org/immunization.html
+    """
+    return await _get_client()._req("GET", f"Immunization/{immun_id}")
+
+
+# (Legacy)
 
 
 @mcp.tool()
