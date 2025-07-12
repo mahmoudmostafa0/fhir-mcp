@@ -462,13 +462,13 @@ async def search_observations(
     date: str | None = None,
     status: str | None = None,
     count: int = 10,
-    summarize: bool = False,
     follow_pagination: bool = False,
     max_pages: int = 3
 ) -> Dict[str, Any]:
     """Search for observations with enhanced filtering and pagination support.
 
     Retrieves observation resources with various filtering options and pagination handling.
+    Results are always returned in a summarized format for better readability and performance.
     Uses for the Observation resource include:
     Vital signs such as body weight, blood pressure, and temperature
     Laboratory Data like blood glucose, or an estimated GFR
@@ -489,13 +489,11 @@ async def search_observations(
         date: Date filter in FHIR format (e.g., 'gt2023-01-01', 'lt2023-12-31', '2023-06-01').
         status: Status of the observation (e.g., 'final', 'preliminary').
         count: The maximum number of results to return per page (default is 10).
-        summarize: If True, returns a summarized version of observations instead of full resources.
         follow_pagination: If True, follows pagination links to retrieve all matching observations.
         max_pages: Maximum number of pages to retrieve when follow_pagination is True.
 
     Returns:
-        If summarize=False: The complete FHIR Bundle response with pagination information.
-        If summarize=True: A dictionary with total count and summarized observation data.
+        A dictionary with total count and summarized observation data.
     """
     # Build query parameters
     params = {"_count": count}
@@ -536,11 +534,7 @@ async def search_observations(
             next_link = next((link["url"] for link in next_page.get("link", []) if link.get("relation") == "next"), None)
             pages_retrieved += 1
     
-    # Return full result if no summarization requested
-    if not summarize:
-        return result
-        
-    # Summarize the observations
+    # Always summarize the observations
     summary = {
         "total": result.get("total", 0),
         "count": len(result.get("entry", [])),
@@ -656,7 +650,7 @@ async def search_conditions(
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Condition resource.
+        A dictionary with simplified condition resources containing only essential fields.
     """
     params = {"_count": count}
     if patient:
@@ -665,7 +659,58 @@ async def search_conditions(
         params["code"] = code
     if clinical_status:
         params["clinical-status"] = clinical_status
-    return await _get_client().search("Condition", **params)
+    
+    # Get the full FHIR bundle
+    bundle = await _get_client().search("Condition", **params)
+    
+    # Extract only the essential information
+    simplified_bundle = {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": bundle.get("total", 0),
+        "entry": []
+    }
+    
+    # Process each entry to extract only needed fields
+    for entry in _entries(bundle):
+        resource = entry.get("resource", {})
+        
+        # Extract essential fields
+        simplified_resource = {
+            "id": resource.get("id"),
+            "subject": resource.get("subject", {}),
+        }
+        
+        # Extract clinical status if available
+        if "clinicalStatus" in resource and "coding" in resource["clinicalStatus"]:
+            codings = resource["clinicalStatus"]["coding"]
+            if codings and len(codings) > 0:
+                simplified_resource["clinicalStatus"] = codings[0].get("code")
+        
+        # Extract code information if available
+        if "code" in resource and "coding" in resource["code"]:
+            codings = resource["code"]["coding"]
+            if codings and len(codings) > 0:
+                simplified_resource["code"] = {
+                    "system": codings[0].get("system"),
+                    "code": codings[0].get("code"),
+                    "display": codings[0].get("display")
+                }
+        
+        # Add onset and recorded dates if available
+        if "onsetDateTime" in resource:
+            simplified_resource["onsetDateTime"] = resource["onsetDateTime"]
+        if "recordedDate" in resource:
+            simplified_resource["recordedDate"] = resource["recordedDate"]
+        if "abatementDateTime" in resource:
+            simplified_resource["abatementDateTime"] = resource["abatementDateTime"]
+        
+        # Add to the simplified bundle
+        simplified_bundle["entry"].append({
+            "resource": simplified_resource
+        })
+    
+    return simplified_bundle
 
 
 @mcp.tool()
@@ -687,7 +732,7 @@ async def search_medication_requests(
         count: The maximum number of results to return (default is 10).
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR MedicationRequest resource.
+        A dictionary with simplified medication request resources containing only essential fields.
     """
     params = {"_count": count}
     if patient:
@@ -696,7 +741,70 @@ async def search_medication_requests(
         params["status"] = status
     if intent:
         params["intent"] = intent
-    return await _get_client().search("MedicationRequest", **params)
+    
+    # Get the full FHIR bundle
+    bundle = await _get_client().search("MedicationRequest", **params)
+    
+    # Extract only the essential information
+    simplified_bundle = {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": bundle.get("total", 0),
+        "entry": []
+    }
+    
+    # Process each entry to extract only needed fields
+    for entry in _entries(bundle):
+        resource = entry.get("resource", {})
+        
+        # Extract essential fields
+        simplified_resource = {
+            "id": resource.get("id"),
+            "status": resource.get("status"),
+        }
+        
+        # Add intent if available
+        if "intent" in resource:
+            simplified_resource["intent"] = resource["intent"]
+            
+        # Add subject/patient reference if available
+        if "subject" in resource:
+            simplified_resource["subject"] = resource["subject"]
+        
+        # Extract medication information if available
+        if "medicationCodeableConcept" in resource and "coding" in resource["medicationCodeableConcept"]:
+            codings = resource["medicationCodeableConcept"]["coding"]
+            if codings and len(codings) > 0:
+                simplified_resource["medication"] = {
+                    "system": codings[0].get("system"),
+                    "code": codings[0].get("code"),
+                    "display": codings[0].get("display")
+                }
+        
+        # Add simplified dosage instructions if available
+        if "dosageInstruction" in resource and resource["dosageInstruction"]:
+            dosage = resource["dosageInstruction"][0]  # Take only the first dosage instruction
+            simplified_dosage = {}
+            
+            # Extract key dosage information
+            if "text" in dosage:
+                simplified_dosage["text"] = dosage["text"]
+            if "asNeededBoolean" in dosage:
+                simplified_dosage["asNeeded"] = dosage["asNeededBoolean"]
+            if "timing" in dosage and "repeat" in dosage["timing"]:
+                repeat = dosage["timing"]["repeat"]
+                if "frequency" in repeat and "period" in repeat and "periodUnit" in repeat:
+                    simplified_dosage["frequency"] = f"{repeat['frequency']} times per {repeat['period']} {repeat['periodUnit']}"
+            
+            if simplified_dosage:
+                simplified_resource["dosage"] = simplified_dosage
+        
+        # Add to the simplified bundle
+        simplified_bundle["entry"].append({
+            "resource": simplified_resource
+        })
+    
+    return simplified_bundle
 
 
 @mcp.tool()
