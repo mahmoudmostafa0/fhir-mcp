@@ -457,7 +457,18 @@ async def search_observations(patient: str | None = None, count: int = 10) -> Di
     """Search for observations.
 
     Retrieves observation resources, optionally filtered by patient.
-
+    Uses for the Observation resource include:
+    Vital signs such as body weight, blood pressure, and temperature
+    Laboratory Data like blood glucose, or an estimated GFR
+    Imaging results like bone density or fetal measurements
+    Clinical Findings* such as abdominal tenderness
+    Device measurements such as EKG data or Pulse Oximetry data
+    Device Settings such as mechanical ventilator parameters.
+    Clinical assessment tools such as APGAR or a Glasgow Coma Score
+    Personal characteristics: such as eye-color
+    Social history like tobacco use, family support, or cognitive status
+    Core characteristics like pregnancy status, or a death assertion
+    Product quality tests such as pH, Assay, Microbial limits, etc. on product, substance, or an environment.
     Args:
         patient: The ID of the patient to retrieve observations for.
         count: The maximum number of results to return (default is 10).
@@ -1398,32 +1409,7 @@ async def search_all_practitioner_roles(count: int = 10) -> List[Dict[str, Any]]
 
 
 
-@mcp.tool()
-async def active_medications(patient_id: str) -> Dict[str, Any]:
-    """
-    Retrieve the active Medications list and number of active medications for a given patient.
 
-    This tool fetches all MedicationRequest resources for the patient and counts the active ones.
-    While it does not make clinical decisions, the result may indicate polypharmacy if the count is high (bigger than 5).
-    you should alert the doctor if the count bigger than or equal 5 active Medications.
-
-    Args:
-        patient_id: The FHIR Patient resource ID.
-
-    Returns:
-        A dictionary containing the list of active medications and a summary message.
-    """
-    params = {"subject": f"Patient/{patient_id}"}
-    bundle = await _get_client().search("MedicationRequest", **params)
-    meds = [entry["resource"] for entry in _entries(bundle)]
-    active_meds = [m for m in meds if m.get("status") == "active"]
-
-    return {
-        "active_medications": active_meds,
-        "summary": f"Patient is currently on {len(active_meds)} active medications.",
-        "count": len(active_meds),
-        "polypharmacy_alert": len(active_meds) >= 5
-    }
 @mcp.tool()
 async def check_flu_vaccine(patient_id: str) -> Optional[str]:
     """
@@ -1449,37 +1435,6 @@ async def check_flu_vaccine(patient_id: str) -> Optional[str]:
             return None
     return "💉 No flu shot in over a year – annual immunization recommended."
 
-
-# ---------- Latest HbA1c Result ----------
-@mcp.tool()
-async def get_latest_hba1c(patient_id: str) -> Optional[str]:
-    """
-    Retrieve the most recent HbA1c (hemoglobin A1c) lab result for diabetes monitoring.
-
-    This function is useful for doctors tracking blood sugar control in diabetic or prediabetic patients.
-    It queries the FHIR Observation resource for the HbA1c LOINC code (4548-4) and returns the most
-    recent test result. HbA1c reflects average blood glucose levels over the last ~3 months.
-
-    Args:
-        patient_id: The FHIR Patient resource ID.
-
-    Returns:
-        A string containing the most recent HbA1c value and its test date,
-        or None if no such record is found.
-    """
-    params = {
-        "subject": f"Patient/{patient_id}",
-        "code": "4548-4",  # LOINC for Hemoglobin A1c
-        "_sort": "-date",
-        "_count": 1
-    }
-    obs = [e["resource"] for e in _entries(await _get_client().search("Observation", **params))]
-    if obs:
-        val = obs[0].get("valueQuantity", {}).get("value")
-        date = obs[0].get("effectiveDateTime", "")
-        if val:
-            return f"🧪 Latest HbA1c: {val}% on {date}"
-    return None
 
 
 # ---------- BRCA1 or Family Cancer History ----------
@@ -1535,52 +1490,6 @@ async def check_family_heart_history(patient_id: str) -> Optional[str]:
             return "🫀 Family history shows early-onset heart disease – suggest LDL screening every 6 months."
     return None
 
-@mcp.tool()
-async def get_vital_history(patient_id: str, vital_type: str = "blood_pressure") -> Optional[Dict[str, List[Dict[str, str]]]]:
-    """
-    Fetch historical vital sign data (blood pressure or glucose) for visualization.
-
-    Args:
-        patient_id: The FHIR Patient resource ID.
-        vital_type: Type of vital to fetch: 'blood_pressure' or 'glucose'.
-
-    Returns:
-        A dictionary containing a list of value/date pairs for plotting.
-    """
-    if vital_type == "blood_pressure":
-        code = "85354-9"  # LOINC panel for BP
-    elif vital_type == "glucose":
-        code = "2339-0"  # LOINC for Glucose [Mass/volume] in Blood
-    else:
-        return None
-
-    params = {
-        "subject": f"Patient/{patient_id}",
-        "code": code,
-        "_sort": "-date",
-        "_count": 20
-    }
-
-    obs = [e["resource"] for e in _entries(await _get_client().search("Observation", **params))]
-    history = []
-
-    for o in obs:
-        date = o.get("effectiveDateTime")
-        if vital_type == "blood_pressure":
-            for comp in o.get("component", []):
-                coding = comp.get("code", {}).get("coding", [{}])[0].get("code")
-                value = comp.get("valueQuantity", {}).get("value")
-                label = "Systolic" if coding == "8480-6" else "Diastolic" if coding == "8462-4" else None
-                if label and value:
-                    history.append({"label": label, "value": value, "date": date})
-        else:
-            value = o.get("valueQuantity", {}).get("value")
-            if value:
-                history.append({"label": "Glucose", "value": value, "date": date})
-
-    if not history:
-        return None
-    return {"data": history}
 
 @mcp.tool()
 async def create_appointment(
