@@ -180,61 +180,6 @@ def _entries(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
     return bundle.get("entry", []) if bundle.get("resourceType") == "Bundle" else []
 
 
-def reformat_observations(bundle: Dict[str, Any]) -> list[dict]:
-    """
-    Reformat a FHIR Observation Bundle into a concise list of dicts for MCP server.
-    Handles valueQuantity and blood pressure (systolic/diastolic) observations.
-    """
-    result = []
-    for entry in bundle.get("entry", []):
-        obs = entry.get("resource", {})
-        # Defensive: skip if not an Observation
-        if obs.get("resourceType") != "Observation":
-            continue
-        # Category
-        category = None
-        if obs.get("category") and obs["category"][0].get("coding"):
-            category = obs["category"][0]["coding"][0].get("code")
-        # Code
-        code_info = (obs.get("code", {}).get("coding", [{}])[0])
-        code = code_info.get("code")
-        code_display = code_info.get("display")
-        # Date
-        date = obs.get("effectiveDateTime")
-        # Note
-        note = obs.get("note", [{}])[0].get("text") if obs.get("note") else None
-        # Blood Pressure Panel
-        if code == "85354-9":
-            systolic = diastolic = None
-            for comp in obs.get("component", []):
-                comp_code = comp.get("code", {}).get("coding", [{}])[0].get("code")
-                if comp_code == "8480-6":  # Systolic
-                    systolic = comp.get("valueQuantity", {}).get("value")
-                elif comp_code == "8462-4":  # Diastolic
-                    diastolic = comp.get("valueQuantity", {}).get("value")
-            result.append({
-                "id": obs.get("id"),
-                "category": category,
-                "code": {"code": code, "display": code_display},
-                "date": date,
-                "systolic": systolic,
-                "diastolic": diastolic,
-                "unit": "mmHg"
-            })
-        else:
-            value = obs.get("valueQuantity", {}).get("value")
-            unit = obs.get("valueQuantity", {}).get("unit")
-            result.append({
-                "id": obs.get("id"),
-                "category": category,
-                "code": {"code": code, "display": code_display},
-                "date": date,
-                "value": value,
-                "unit": unit,
-                "note": note
-            })
-    return result
-
 
 
 # ──────────────────────────────
@@ -510,10 +455,20 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
 
 
 @mcp.tool()
-async def search_observations(patient: str | None = None, count: int = 10) -> Dict[str, Any]:
-    """Search for observations.
+async def search_observations(
+    patient: str | None = None, 
+    code: str | None = None,
+    category: str | None = None,
+    date: str | None = None,
+    status: str | None = None,
+    count: int = 10,
+    summarize: bool = False,
+    follow_pagination: bool = False,
+    max_pages: int = 3
+) -> Dict[str, Any]:
+    """Search for observations with enhanced filtering and pagination support.
 
-    Retrieves observation resources, optionally filtered by patient.
+    Retrieves observation resources with various filtering options and pagination handling.
     Uses for the Observation resource include:
     Vital signs such as body weight, blood pressure, and temperature
     Laboratory Data like blood glucose, or an estimated GFR
@@ -526,17 +481,147 @@ async def search_observations(patient: str | None = None, count: int = 10) -> Di
     Social history like tobacco use, family support, or cognitive status
     Core characteristics like pregnancy status, or a death assertion
     Product quality tests such as pH, Assay, Microbial limits, etc. on product, substance, or an environment.
+
     Args:
         patient: The ID of the patient to retrieve observations for.
-        count: The maximum number of results to return (default is 10).
+        code: LOINC or SNOMED code to filter observations by type (e.g., '4548-4' for HbA1c).
+        category: Category of observation (e.g., 'laboratory', 'vital-signs').
+        date: Date filter in FHIR format (e.g., 'gt2023-01-01', 'lt2023-12-31', '2023-06-01').
+        status: Status of the observation (e.g., 'final', 'preliminary').
+        count: The maximum number of results to return per page (default is 10).
+        summarize: If True, returns a summarized version of observations instead of full resources.
+        follow_pagination: If True, follows pagination links to retrieve all matching observations.
+        max_pages: Maximum number of pages to retrieve when follow_pagination is True.
 
     Returns:
-        A list of dictionaries, where each dictionary is a FHIR Observation resource.
+        If summarize=False: The complete FHIR Bundle response with pagination information.
+        If summarize=True: A dictionary with total count and summarized observation data.
     """
+    # Build query parameters
     params = {"_count": count}
     if patient:
         params["patient"] = patient
-    return await _get_client().search("Observation", **params)
+    if code:
+        params["code"] = code
+    if category:
+        params["category"] = category
+    if date:
+        params["date"] = date
+    if status:
+        params["status"] = status
+    
+    # Initial search
+    result = await _get_client().search("Observation", **params)
+    
+    # Handle pagination if requested
+    if follow_pagination and "link" in result:
+        next_link = next((link["url"] for link in result.get("link", []) if link.get("relation") == "next"), None)
+        pages_retrieved = 1
+        
+        while next_link and pages_retrieved < max_pages:
+            # Extract the URL path and query parameters
+            if "_getpages" in next_link:
+                # Handle HAPI FHIR pagination format
+                next_page = await _get_client()._req("GET", next_link.split("/fhir/")[1] if "/fhir/" in next_link else next_link.split("/fhir")[1])
+            else:
+                # Handle standard FHIR pagination
+                path_parts = next_link.split(FHIR_BASE_URL)[1] if FHIR_BASE_URL in next_link else next_link
+                next_page = await _get_client()._req("GET", path_parts)
+                
+            # Add entries from next page to our result
+            if "entry" in next_page and next_page["entry"]:
+                result["entry"].extend(next_page["entry"])
+                
+            # Update next link
+            next_link = next((link["url"] for link in next_page.get("link", []) if link.get("relation") == "next"), None)
+            pages_retrieved += 1
+    
+    # Return full result if no summarization requested
+    if not summarize:
+        return result
+        
+    # Summarize the observations
+    summary = {
+        "total": result.get("total", 0),
+        "count": len(result.get("entry", [])),
+        "observations": []
+    }
+    
+    for entry in result.get("entry", []):
+        if "resource" not in entry:
+            continue
+            
+        obs = entry["resource"]
+        obs_summary = {
+            "id": obs.get("id"),
+            "status": obs.get("status"),
+            "date": obs.get("effectiveDateTime"),
+            "type": _extract_coding_display(obs.get("code", {}).get("coding", [])),
+            "category": _extract_categories(obs.get("category", [])),
+        }
+        
+        # Handle different value types
+        if "valueQuantity" in obs:
+            obs_summary["value"] = {
+                "value": obs["valueQuantity"].get("value"),
+                "unit": obs["valueQuantity"].get("unit")
+            }
+        elif "valueString" in obs:
+            obs_summary["value"] = obs["valueString"]
+        elif "valueBoolean" in obs:
+            obs_summary["value"] = obs["valueBoolean"]
+        elif "valueInteger" in obs:
+            obs_summary["value"] = obs["valueInteger"]
+        elif "valueCodeableConcept" in obs:
+            obs_summary["value"] = _extract_coding_display(obs["valueCodeableConcept"].get("coding", []))
+        elif "component" in obs:
+            # Handle component-based observations like blood pressure
+            components = []
+            for component in obs["component"]:
+                comp_data = {
+                    "type": _extract_coding_display(component.get("code", {}).get("coding", [])),
+                }
+                
+                if "valueQuantity" in component:
+                    comp_data["value"] = {
+                        "value": component["valueQuantity"].get("value"),
+                        "unit": component["valueQuantity"].get("unit")
+                    }
+                components.append(comp_data)
+            obs_summary["components"] = components
+            
+        # Add notes if present
+        if "note" in obs and obs["note"]:
+            obs_summary["notes"] = [note.get("text") for note in obs["note"] if "text" in note]
+            
+        summary["observations"].append(obs_summary)
+        
+    return summary
+
+
+def _extract_coding_display(codings: List[Dict[str, Any]]) -> str:
+    """Extract display text from a list of codings."""
+    if not codings:
+        return ""
+    for coding in codings:
+        if "display" in coding:
+            return coding["display"]
+    # Fallback to code if no display
+    for coding in codings:
+        if "code" in coding:
+            return coding["code"]
+    return ""
+
+
+def _extract_categories(categories: List[Dict[str, Any]]) -> List[str]:
+    """Extract category names from category objects."""
+    result = []
+    for category in categories:
+        if "coding" in category:
+            for coding in category["coding"]:
+                if "code" in coding:
+                    result.append(coding["code"])
+    return result
 
 
 @mcp.tool()
