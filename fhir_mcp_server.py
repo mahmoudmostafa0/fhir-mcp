@@ -180,6 +180,63 @@ def _entries(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
     return bundle.get("entry", []) if bundle.get("resourceType") == "Bundle" else []
 
 
+def reformat_observations(bundle: Dict[str, Any]) -> list[dict]:
+    """
+    Reformat a FHIR Observation Bundle into a concise list of dicts for MCP server.
+    Handles valueQuantity and blood pressure (systolic/diastolic) observations.
+    """
+    result = []
+    for entry in bundle.get("entry", []):
+        obs = entry.get("resource", {})
+        # Defensive: skip if not an Observation
+        if obs.get("resourceType") != "Observation":
+            continue
+        # Category
+        category = None
+        if obs.get("category") and obs["category"][0].get("coding"):
+            category = obs["category"][0]["coding"][0].get("code")
+        # Code
+        code_info = (obs.get("code", {}).get("coding", [{}])[0])
+        code = code_info.get("code")
+        code_display = code_info.get("display")
+        # Date
+        date = obs.get("effectiveDateTime")
+        # Note
+        note = obs.get("note", [{}])[0].get("text") if obs.get("note") else None
+        # Blood Pressure Panel
+        if code == "85354-9":
+            systolic = diastolic = None
+            for comp in obs.get("component", []):
+                comp_code = comp.get("code", {}).get("coding", [{}])[0].get("code")
+                if comp_code == "8480-6":  # Systolic
+                    systolic = comp.get("valueQuantity", {}).get("value")
+                elif comp_code == "8462-4":  # Diastolic
+                    diastolic = comp.get("valueQuantity", {}).get("value")
+            result.append({
+                "id": obs.get("id"),
+                "category": category,
+                "code": {"code": code, "display": code_display},
+                "date": date,
+                "systolic": systolic,
+                "diastolic": diastolic,
+                "unit": "mmHg"
+            })
+        else:
+            value = obs.get("valueQuantity", {}).get("value")
+            unit = obs.get("valueQuantity", {}).get("unit")
+            result.append({
+                "id": obs.get("id"),
+                "category": category,
+                "code": {"code": code, "display": code_display},
+                "date": date,
+                "value": value,
+                "unit": unit,
+                "note": note
+            })
+    return result
+
+
+
 # ──────────────────────────────
 # Tools (docstring 1st line = description)
 # ──────────────────────────────
@@ -700,14 +757,14 @@ async def find_patients_with_conditions(code: str | None = None, count: int = 10
 
 
 @mcp.tool()
-async def search_medicines(
+async def search_medicines_online(
     medicine_name: str,
     from_index: int = 1,
     size: int = 30,
     is_trending: bool = False,
     pharmacy_type_id: int = 0
 ) -> Dict[str, Any]:
-    """Search for medicines and get their information (price,active_ingredients) from Vezeeta pharmacy database based on medicine name"""
+    """Search for medicines and get their information online (price,active_ingredients) from Vezeeta pharmacy database based on medicine name"""
     
     # Vezeeta API endpoint
     url = "https://v-gateway.vezeetaservices.com/inventory/api/V2/ProductShapes"
@@ -1170,7 +1227,6 @@ async def search_immunization(
     Search for Immunization resources using FHIR-compliant parameters.
 
     This tool allows searching for Immunization records using a variety of FHIR search parameters, including patient reference, date, status, vaccine code, manufacturer, lot number, resource ID, and last updated timestamp.
-    See the [FHIR Immunization Search documentation](https://build.fhir.org/immunization.html#search) for parameter details.
 
     Args:
         patient: Search by patient reference (e.g., 'Patient/605982' or '605982').
@@ -1185,22 +1241,6 @@ async def search_immunization(
 
     Returns:
         A FHIR Bundle containing matching Immunization resources.
-
-    Example Response:
-        {
-            "resourceType": "Bundle",
-            "type": "searchset",
-            "total": 1,
-            "entry": [
-                {
-                    "fullUrl": "...",
-                    "resource": {...}
-                }
-            ]
-        }
-
-    Reference:
-        https://build.fhir.org/immunization.html
     """
     params = {"_count": count}
     if patient:
@@ -1235,51 +1275,6 @@ async def get_immunization(immun_id: str) -> dict:
     Returns:
         A dictionary representing the FHIR Immunization resource.
 
-    Example Response:
-        {
-            "resourceType": "Immunization",
-            "id": "606072",
-            "meta": {
-                "versionId": "1",
-                "lastUpdated": "2025-07-11T17:49:59.053+00:00",
-                "source": "#drukldXxpuR7msGX"
-            },
-            "status": "completed",
-            "vaccineCode": {
-                "coding": [
-                    {
-                        "system": "http://hl7.org/fhir/sid/cvx",
-                        "code": "133",
-                        "display": "Pneumococcal conjugate vaccine (13-valent)"
-                    }
-                ]
-            },
-            "patient": {
-                "reference": "Patient/605982"
-            },
-            "occurrenceDateTime": "2022-09-20",
-            "recorded": "2022-09-20T14:15:00+02:00",
-            "primarySource": true,
-            "lotNumber": "PNM2022Z",
-            "site": {
-                "coding": [
-                    {
-                        "system": "http://terminology.hl7.org/CodeSystem/v3-ActSite",
-                        "code": "LD",
-                        "display": "Left deltoid"
-                    }
-                ]
-            },
-            "route": {
-                "coding": [
-                    {
-                        "system": "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
-                        "code": "IM",
-                        "display": "Intramuscular"
-                    }
-                ]
-            }
-        }
 
     Reference:
         https://build.fhir.org/immunization.html
@@ -1409,31 +1404,6 @@ async def search_all_practitioner_roles(count: int = 10) -> List[Dict[str, Any]]
 
 
 
-
-@mcp.tool()
-async def check_flu_vaccine(patient_id: str) -> Optional[str]:
-    """
-    Determine if the patient has received a flu vaccination within the past year.
-
-    This function helps clinicians check the patient's immunization history for an annual flu vaccine.
-    It uses the FHIR Immunization resource to search for any influenza vaccine records. If no such
-    record is found in the past 12 months, the function returns a recommendation to vaccinate.
-
-    Args:
-        patient_id: The FHIR Patient resource ID.
-
-    Returns:
-        A reminder message if the patient is overdue for a flu shot, or None if they are up to date.
-    """
-    import datetime
-    one_year_ago = datetime.datetime.utcnow().date().isoformat()
-    params = {"patient": f"Patient/{patient_id}", "vaccine-code": "FLU"}  # Simplified placeholder code
-    imm = [e["resource"] for e in _entries(await _get_client().search("Immunization", **params))]
-    for i in imm:
-        date = i.get("occurrenceDateTime")
-        if date and date >= one_year_ago:
-            return None
-    return "💉 No flu shot in over a year – annual immunization recommended."
 
 
 
