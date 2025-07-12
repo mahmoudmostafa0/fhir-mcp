@@ -1617,7 +1617,7 @@ async def create_appointment(
     location_id: str | None = None
 ) -> Dict[str, Any]:
     """Create a new appointment in the FHIR server.
-
+    IMPORTANT: This function checks if the schedule is free before creating an appointment!
     Creates a new appointment resource with the specified details. The appointment
     will be linked to the specified patient and optionally to a practitioner.
 
@@ -1645,58 +1645,201 @@ async def create_appointment(
             }]
         }
 
-    # Create the appointment resource
-    appointment = {
-        "resourceType": "Appointment",
-        "status": status,
-        "start": start_time,
-        "end": end_time,
-        "participant": [
-            {
-                "actor": {
-                    "reference": f"Patient/{patient_id}"
-                },
-                "status": "accepted"
-            }
-        ]
-    }
-
-    # Add optional fields if provided
-    if description:
-        appointment["description"] = description
-
-    if appointment_type:
-        appointment["appointmentType"] = {
-            "coding": [
+    try:
+        client = _get_client()
+        
+        # CHECK FOR EXISTING FREE APPOINTMENTS FIRST
+        # Build search parameters for checking availability
+        search_params = {
+            "date": start_time,  # This checks for appointments on the same date
+            "status": "free"
+        }
+        
+        # Add practitioner to search if specified
+        if practitioner_id:
+            search_params["actor"] = f"Practitioner/{practitioner_id}"
+        
+        # Add location to search if specified
+        if location_id:
+            search_params["actor"] = f"Location/{location_id}"
+        
+        # Search for existing free appointments
+        existing_appointments = await client.search("Appointment", **search_params)
+        
+        # Check if we found any free appointments in the time slot
+        if existing_appointments.get("entry"):
+            for entry in existing_appointments["entry"]:
+                appointment_resource = entry["resource"]
+                
+                # Check if the time slot overlaps with our requested time
+                existing_start = appointment_resource.get("start")
+                existing_end = appointment_resource.get("end")
+                
+                if existing_start and existing_end:
+                    # Convert to datetime for comparison
+                    from datetime import datetime
+                    import dateutil.parser
+                    
+                    req_start = dateutil.parser.parse(start_time)
+                    req_end = dateutil.parser.parse(end_time)
+                    exist_start = dateutil.parser.parse(existing_start)
+                    exist_end = dateutil.parser.parse(existing_end)
+                    
+                    # Check if times match exactly or overlap
+                    if (req_start == exist_start and req_end == exist_end) or \
+                       (req_start < exist_end and req_end > exist_start):
+                        
+                        # Found a matching free appointment - update it instead of creating new
+                        appointment_id = appointment_resource["id"]
+                        
+                        # Update the existing appointment
+                        updated_appointment = appointment_resource.copy()
+                        updated_appointment["status"] = status
+                        
+                        # Update participant to include the patient
+                        updated_appointment["participant"] = [
+                            {
+                                "actor": {
+                                    "reference": f"Patient/{patient_id}"
+                                },
+                                "status": "accepted"
+                            }
+                        ]
+                        
+                        # Add practitioner if provided
+                        if practitioner_id:
+                            updated_appointment["participant"].append({
+                                "actor": {
+                                    "reference": f"Practitioner/{practitioner_id}"
+                                },
+                                "status": "accepted"
+                            })
+                        
+                        # Add location if provided
+                        if location_id:
+                            updated_appointment["participant"].append({
+                                "actor": {
+                                    "reference": f"Location/{location_id}"
+                                },
+                                "status": "accepted"
+                            })
+                        
+                        # Add description if provided
+                        if description:
+                            updated_appointment["description"] = description
+                        
+                        # Add appointment type if provided
+                        if appointment_type:
+                            updated_appointment["appointmentType"] = {
+                                "coding": [
+                                    {
+                                        "system": "http://terminology.hl7.org/CodeSystem/v2-0276",
+                                        "code": appointment_type
+                                    }
+                                ]
+                            }
+                        
+                        # Update the existing appointment
+                        result = await client.update("Appointment", appointment_id, updated_appointment)
+                        return result
+        
+        # CHECK FOR CONFLICTING APPOINTMENTS
+        # Search for any appointments (not just free ones) that might conflict
+        conflict_search_params = {
+            "date": start_time
+        }
+        
+        if practitioner_id:
+            conflict_search_params["actor"] = f"Practitioner/{practitioner_id}"
+        
+        existing_appointments = await client.search("Appointment", **conflict_search_params)
+        
+        # Check for time conflicts
+        if existing_appointments.get("entry"):
+            for entry in existing_appointments["entry"]:
+                appointment_resource = entry["resource"]
+                
+                # Skip if this appointment is cancelled or no-show
+                if appointment_resource.get("status") in ["cancelled", "noshow"]:
+                    continue
+                
+                existing_start = appointment_resource.get("start")
+                existing_end = appointment_resource.get("end")
+                
+                if existing_start and existing_end:
+                    from datetime import datetime
+                    import dateutil.parser
+                    
+                    req_start = dateutil.parser.parse(start_time)
+                    req_end = dateutil.parser.parse(end_time)
+                    exist_start = dateutil.parser.parse(existing_start)
+                    exist_end = dateutil.parser.parse(existing_end)
+                    
+                    # Check for overlap
+                    if req_start < exist_end and req_end > exist_start:
+                        return {
+                            "resourceType": "OperationOutcome",
+                            "issue": [{
+                                "severity": "error",
+                                "code": "conflict",
+                                "details": {
+                                    "text": f"Time slot conflict: An appointment already exists from {existing_start} to {existing_end}"
+                                }
+                            }]
+                        }
+        
+        # NO FREE APPOINTMENTS FOUND AND NO CONFLICTS - CREATE NEW APPOINTMENT
+        appointment = {
+            "resourceType": "Appointment",
+            "status": status,
+            "start": start_time,
+            "end": end_time,
+            "participant": [
                 {
-                    "system": "http://terminology.hl7.org/CodeSystem/v2-0276",
-                    "code": appointment_type
+                    "actor": {
+                        "reference": f"Patient/{patient_id}"
+                    },
+                    "status": "accepted"
                 }
             ]
         }
 
-    # Add practitioner if provided
-    if practitioner_id:
-        appointment["participant"].append({
-            "actor": {
-                "reference": f"Practitioner/{practitioner_id}"
-            },
-            "status": "accepted"
-        })
+        # Add optional fields if provided
+        if description:
+            appointment["description"] = description
 
-    # Add location if provided
-    if location_id:
-        appointment["participant"].append({
-            "actor": {
-                "reference": f"Location/{location_id}"
-            },
-            "status": "accepted"
-        })
+        if appointment_type:
+            appointment["appointmentType"] = {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/v2-0276",
+                        "code": appointment_type
+                    }
+                ]
+            }
 
-    # Create the appointment in the FHIR server
-    try:
-        result = await _get_client().create("Appointment", appointment)
+        # Add practitioner if provided
+        if practitioner_id:
+            appointment["participant"].append({
+                "actor": {
+                    "reference": f"Practitioner/{practitioner_id}"
+                },
+                "status": "accepted"
+            })
+
+        # Add location if provided
+        if location_id:
+            appointment["participant"].append({
+                "actor": {
+                    "reference": f"Location/{location_id}"
+                },
+                "status": "accepted"
+            })
+
+        # Create the appointment in the FHIR server
+        result = await client.create("Appointment", appointment)
         return result
+        
     except Exception as e:
         return {
             "resourceType": "OperationOutcome",
@@ -1706,7 +1849,6 @@ async def create_appointment(
                 "details": {"text": f"Error creating appointment: {str(e)}"}
             }]
         }
-
 
 @mcp.tool()
 async def get_practitioner(practitioner_id: str) -> Dict[str, Any]:
