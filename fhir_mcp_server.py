@@ -332,7 +332,7 @@ async def search_patients(
     first_name: str | None = None,
     family_name: str | None = None,
     count: int = 10,
-) -> List[Dict[str, Any]]:
+) -> List[str]:
     """
     Search for patients and return a compact, human-readable summary of each match.
 
@@ -365,7 +365,7 @@ async def search_patients(
 
 
 @mcp.tool()
-async def search_all_patients(count: int = 10) -> List[Dict[str, Any]]:
+async def search_all_patients(count: int = 10) -> List[str]:
     """Get all patients (no filters).
 
     Retrieves a list of all patient resources from the FHIR server, without applying any filters.
