@@ -1917,8 +1917,8 @@ async def get_medication_statement(statement_id: str) -> Dict[str, Any]:
 @mcp.tool()
 async def search_medication_statements(patient_id: str, count: int = 10) -> Dict[str, Any]:
     """
-    Search for medication statements for a specific patient.
-
+    Search for medication statements (active meditations) for a specific patient.
+    it can be used to retrieve a list of medications a patient is currently taking or has taken in the past.
     Retrieves a bundle of FHIR MedicationStatement resources for the given patient ID.
     Useful for listing all medications a patient is currently taking or has taken.
 
