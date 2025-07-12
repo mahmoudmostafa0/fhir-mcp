@@ -117,9 +117,42 @@ def _human_name(pt: Dict[str, Any]) -> str:
     return "Unknown"
 
 
+def _format_address(address: Dict[str, Any]) -> str:
+    """Format an address dictionary into a single string."""
+    lines = address.get("line", [])
+    city = address.get("city", "")
+    state = address.get("state", "")
+    postal_code = address.get("postalCode", "")
+    country = address.get("country", "")
+    
+    address_parts = lines + [f"{city}, {state} {postal_code}", country]
+    return ", ".join(filter(None, address_parts))
 
-# def _practitioner_summary(practitioner: Dict[str, Any]) -> str:
-#     return f"🆔 {practitioner.get('id','?')} | {_human_name(practitioner)}"
+def _pt_summary(pt: Dict[str, Any]) -> str:
+    return f"🆔 {pt.get('id','?')} | {_human_name(pt)} | DOB {pt.get('birthDate','?')} | {pt.get('gender','?')}"
+
+def _practitioner_summary(practitioner: Dict[str, Any]) -> str:
+    summary = f"🆔 {practitioner.get('id','?')} | {_human_name(practitioner)}"
+    
+    # Extract specialty from qualification if available
+    specialty = None
+    if practitioner.get('qualification'):
+        for qual in practitioner.get('qualification', []):
+            if qual.get('code', {}).get('coding'):
+                coding = qual['code']['coding'][0]
+                specialty = coding.get('display')
+                if specialty:
+                    break
+                
+    # Add specialty to summary if available
+    if specialty:
+        summary += f" | 👨‍⚕️ {specialty}"
+    
+    # Add address to summary if available
+    if practitioner.get('address'):
+        summary += f" | 🏥 {_format_address(practitioner['address'][0])}"
+    
+    return summary
 
 
 def _format_organization(org: Dict[str, Any]) -> Dict[str, Any]:
@@ -295,36 +328,40 @@ async def get_patient(patient_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def search_patients(first_name: str | None = None, family_name: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+async def search_patients(
+    first_name: str | None = None,
+    family_name: str | None = None,
+    count: int = 10,
+) -> List[Dict[str, Any]]:
     """
-    Search for patients in the FHIR server and return Patient resources.
+    Search for patients and return a compact, human-readable summary of each match.
 
-    This function performs a single search query using the provided given name and/or family name
-    against the FHIR Patient resource. It supports partial matching (default FHIR behavior),
-    allowing users to find patients even if only part of the name is known.
-    and it returns id,name, contact information, gender, birth date, address, marital status, and emergency contacts.
+    Instead of returning the full FHIR Patient resources (which are extremely verbose),
+    this helper extracts only the most relevant high-level fields so that the response
+    remains small and LLM-friendly.
 
-    Additional FHIR Patient fields may also be present depending on the server's data.
-
-    Note:
-        Multiple variations of name and family name may be tried across several invocations
-        to improve match coverage. This function itself performs only a single query per call.
+    Each returned dictionary may contain:
+        • id – logical patient id
+        • name – concatenated human name
+        • gender
+        • birthDate
 
     Args:
-        first_name: The patient's given first name to search for (optional, partial allowed).
-        family_name: The patient's family name to search for (optional, partial allowed).
-        count: The maximum number of results to return (default is 10).
+        first_name: Optional given name filter (FHIR `name` search param).
+        family_name: Optional family name filter (FHIR `family` search param).
+        count: Max number of patients to return (default 10).
 
     Returns:
-        A list of dictionaries, each representing a FHIR Patient resource extracted from the Bundle response.
+        List of compact dictionaries describing the matching patients.
     """
-    params = {"_count": count}
+    params: Dict[str, Any] = {"_count": count}
     if first_name:
         params["name"] = first_name
     if family_name:
         params["family"] = family_name
+
     b = await _get_client().search("Patient", **params)
-    return [e["resource"] for e in _entries(b)]
+    return [_pt_summary(e["resource"]) for e in _entries(b)]
 
 
 @mcp.tool()
@@ -343,7 +380,7 @@ async def search_all_patients(count: int = 10) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
-async def search_practitioners(name: str | None = None, family: str | None = None, count: int = 10) -> List[Dict[str, Any]]:
+async def search_practitioners(name: str | None = None, family: str | None = None, count: int = 10) -> List[str]:
     """
     Find *doctors* (FHIR **Practitioner** resources) on the connected FHIR server.
 
@@ -364,94 +401,8 @@ async def search_practitioners(name: str | None = None, family: str | None = Non
     if family:
         params["family"] = family
     b = await _get_client().search("Practitioner", **params)
-    practitioners = []
+    return [_practitioner_summary(e["resource"]) for e in _entries(b)]
     
-    for entry in _entries(b):
-        resource = entry["resource"]
-        practitioner_info = {
-            "id": resource.get("id", ""),
-            "active": resource.get("active", False)
-        }
-        
-        # Extract name information
-        if resource.get("name") and len(resource["name"]) > 0:
-            name_data = resource["name"][0]
-            full_name = ""
-            
-            # Add prefix if available
-            if name_data.get("prefix"):
-                full_name += f"{name_data['prefix'][0]} "
-                
-            # Add given name if available
-            if name_data.get("given"):
-                full_name += f"{name_data['given'][0]} "
-                
-            # Add family name if available
-            if name_data.get("family"):
-                full_name += name_data["family"]
-                
-            practitioner_info["name"] = full_name.strip()
-        
-        # Extract contact information
-        if resource.get("telecom") and len(resource["telecom"]) > 0:
-            for contact in resource["telecom"]:
-                if contact.get("system") and contact.get("value"):
-                    practitioner_info[contact["system"]] = contact["value"]
-        
-        # Extract address information
-        if resource.get("address") and len(resource["address"]) > 0:
-            address = resource["address"][0]
-            address_parts = []
-            
-            if address.get("line"):
-                address_parts.extend(address["line"])
-            if address.get("city"):
-                address_parts.append(address["city"])
-            if address.get("state"):
-                address_parts.append(address["state"])
-            if address.get("postalCode"):
-                address_parts.append(address["postalCode"])
-            if address.get("country"):
-                address_parts.append(address["country"])
-                
-            practitioner_info["address"] = ", ".join(address_parts)
-        
-        # Extract gender
-        if resource.get("gender"):
-            practitioner_info["gender"] = resource["gender"]
-            
-        # Extract identifier (like NPI)
-        if resource.get("identifier") and len(resource["identifier"]) > 0:
-            for identifier in resource["identifier"]:
-                if identifier.get("system") and identifier.get("value"):
-                    system_name = identifier["system"].split("/")[-1] if "/" in identifier["system"] else identifier["system"]
-                    practitioner_info[f"identifier_{system_name}"] = identifier["value"]
-        
-        # Extract birth date
-        if resource.get("birthDate"):
-            practitioner_info["birthDate"] = resource["birthDate"]
-        
-        # Extract qualifications
-        if resource.get("qualification") and len(resource["qualification"]) > 0:
-            qualifications = []
-            for qual in resource["qualification"]:
-                if qual.get("code"):
-                    # Try to get text description first
-                    if qual["code"].get("text"):
-                        qualifications.append(qual["code"]["text"])
-                    # Otherwise try to get display from coding
-                    elif qual["code"].get("coding") and len(qual["code"]["coding"]) > 0:
-                        for coding in qual["code"]["coding"]:
-                            if coding.get("display"):
-                                qualifications.append(coding["display"])
-                                break
-            
-            if qualifications:
-                practitioner_info["qualifications"] = qualifications
-        
-        practitioners.append(practitioner_info)
-    
-    return practitioners
 
 
 @mcp.tool()
