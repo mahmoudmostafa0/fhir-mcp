@@ -721,6 +721,10 @@ async def search_medication_requests(
         # Add subject/patient reference if available
         if "subject" in resource:
             simplified_resource["subject"] = resource["subject"]
+
+        # Extract medicationReference if available
+        if "medicationReference" in resource:
+            simplified_resource["medicationReference"] = resource["medicationReference"]
         
         # Extract medication information if available
         if "medicationCodeableConcept" in resource and "coding" in resource["medicationCodeableConcept"]:
